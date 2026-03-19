@@ -1,65 +1,324 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useCallback, useMemo } from "react";
+import { I18nProvider, useI18n } from "@/lib/i18n/context";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { useAmplifyJob } from "@/hooks/useAmplifyJob";
+import type { ConversionSettings, JobStatus } from "@/types";
+import {
+  DEFAULT_SCALE,
+  DEFAULT_FLOOR_HEIGHT,
+  DEFAULT_OPACITY,
+} from "@/lib/constants";
+import { api } from "@/lib/api/client";
+
+import { Header } from "@/components/layout/Header";
+import { Footer } from "@/components/layout/Footer";
+import { AboutModal } from "@/components/layout/AboutModal";
+import { GuidelinesModal } from "@/components/guidelines/GuidelinesModal";
+import { DropZone } from "@/components/upload/DropZone";
+import { StoryManager } from "@/components/multi-story/StoryManager";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { Viewer3D } from "@/components/viewer/Viewer3D";
+import { DownloadModal } from "@/components/download/DownloadModal";
+
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import {
+  Play,
+  Download,
+  FileSpreadsheet,
+  RotateCcw,
+  Loader2,
+  Sparkles,
+  Upload,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+function AppContent() {
+  const { t } = useI18n();
+
+  // Modals
+  const [guidelinesOpen, setGuidelinesOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+
+  // File management
+  const {
+    files,
+    fileIds,
+    isUploading,
+    addFiles,
+    removeFile,
+    reorderFiles,
+    clearFiles,
+    hasFiles,
+    applyStartFloor,
+  } = useFileUpload();
+
+  // Job state
+  const { status: jobStatus, job, artifacts, error, startConversion, reset } =
+    useAmplifyJob();
+
+  // Start floor for multi-storey
+  const [startFloor, setStartFloor] = useState("1");
+
+  const handleStartFloorChange = useCallback((value: string) => {
+    setStartFloor(value);
+    applyStartFloor(Number(value));
+  }, [applyStartFloor]);
+
+  // Settings
+  const [settings, setSettings] = useState<ConversionSettings>({
+    scale: DEFAULT_SCALE,
+    floorHeight: DEFAULT_FLOOR_HEIGHT,
+    opacity: DEFAULT_OPACITY,
+    cameraMode: "perspective",
+  });
+
+  // Trigger counter for resetting the 3D view (OrbitControls position/rotation/zoom)
+  const [resetViewTrigger, setResetViewTrigger] = useState(0);
+
+  // ── Derived state: the real status considering files + job lifecycle ──
+  const effectiveStatus: JobStatus = useMemo(() => {
+    // Job lifecycle states take priority
+    if (jobStatus === "processing" || jobStatus === "completed" || jobStatus === "failed") {
+      return jobStatus;
+    }
+    // File-based states
+    if (!hasFiles) return "idle";
+    if (isUploading) return "uploading";
+    // Files present and idle → ready to convert
+    return "ready";
+  }, [jobStatus, hasFiles, isUploading]);
+
+  const isProcessing = effectiveStatus === "processing";
+  const isCompleted = effectiveStatus === "completed";
+  const isFailed = effectiveStatus === "failed";
+  const isReady = effectiveStatus === "ready";
+  const canStart = isReady && !isProcessing;
+
+  // ── Handlers ──
+  const handleStartConversion = useCallback(async () => {
+    if (!hasFiles) return;
+    await startConversion(fileIds, settings);
+  }, [hasFiles, fileIds, settings, startConversion]);
+
+  const handleReset = useCallback(() => {
+    reset();
+    clearFiles();
+  }, [reset, clearFiles]);
+
+  const handleResetView = useCallback(() => {
+    setSettings((prev) => ({ ...prev, cameraMode: "perspective" }));
+    setResetViewTrigger((n) => n + 1);
+  }, []);
+
+  const handleDownloadQuantities = useCallback(async () => {
+    if (!job) return;
+    try {
+      const res = await api.downloadQuantities({ jobId: job.id });
+      const headers = ["要素", "数量", "単位", "面積 (m²)", "長さ (m)"];
+      const rows = res.rows.map((r) =>
+        [r.element, r.count, r.unit, r.totalArea ?? "", r.totalLength ?? ""].join(",")
+      );
+      const csv = [headers.join(","), ...rows].join("\n");
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "quantities.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Silently fail for mock
+    }
+  }, [job]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex min-h-screen flex-col bg-background">
+      <Header onOpenGuidelines={() => setGuidelinesOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
+
+      {/* Hero — only when completely idle */}
+      {effectiveStatus === "idle" && (
+        <div className="border-b border-border/40 bg-gradient-to-b from-white to-background">
+          <div className="mx-auto max-w-screen-2xl px-6 py-12 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-cta/10">
+              <Sparkles className="h-6 w-6 text-cta" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+              {t.app.tagline}
+            </h1>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
+              {t.app.description}
+            </p>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      )}
+
+      {/* Main content */}
+      <div className="mx-auto flex w-full max-w-screen-2xl flex-1 gap-0">
+        {/* Left sidebar */}
+        <aside className="w-80 shrink-0 border-r border-border/40 bg-white">
+          <div className="flex h-full flex-col overflow-y-auto p-5">
+            {/* Upload zone */}
+            <div className="space-y-4">
+              <DropZone
+                onFilesAdded={addFiles}
+                disabled={isProcessing || isCompleted}
+              />
+
+              {/* Uploading indicator */}
+              {isUploading && (
+                <div className="flex items-center gap-2 rounded-lg bg-cta/5 px-3 py-2 text-xs text-cta">
+                  <Upload className="h-3.5 w-3.5 animate-pulse" />
+                  アップロード中…
+                </div>
+              )}
+
+              {/* Story Manager */}
+              {hasFiles && !isUploading && (
+                <StoryManager
+                  files={files}
+                  onReorder={reorderFiles}
+                  onRemove={removeFile}
+                  startFloor={startFloor}
+                  onStartFloorChange={handleStartFloorChange}
+                />
+              )}
+            </div>
+
+            {/* Settings */}
+            {hasFiles && !isUploading && (
+              <>
+                <Separator className="my-5" />
+                <SettingsPanel
+                  settings={settings}
+                  onSettingsChange={setSettings}
+                  onResetView={handleResetView}
+                  disabled={isProcessing || isCompleted}
+                />
+              </>
+            )}
+
+            {/* Spacer */}
+            <div className="flex-1" />
+
+            {/* Action bar */}
+            <div className="mt-5 space-y-2.5 border-t border-border/40 pt-5">
+              {/* Status badge */}
+              <div className="flex items-center justify-between">
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "text-[10px]",
+                    effectiveStatus === "uploading" && "bg-blue-500/10 text-blue-600",
+                    isReady && "bg-cta/10 text-cta",
+                    isProcessing && "animate-pulse bg-cta/10 text-cta",
+                    isCompleted && "bg-emerald-500/10 text-emerald-600",
+                    isFailed && "bg-destructive/10 text-destructive"
+                  )}
+                >
+                  {t.status[effectiveStatus]}
+                </Badge>
+                {(isCompleted || isFailed) && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={handleReset}
+                    className="gap-1 text-[10px] text-muted-foreground"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    リセット
+                  </Button>
+                )}
+              </div>
+
+              {/* Conversion / download actions */}
+              {!isCompleted && (
+                <Button
+                  className="w-full gap-2 bg-cta text-cta-foreground hover:bg-cta/90"
+                  size="lg"
+                  disabled={!canStart}
+                  onClick={handleStartConversion}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {t.actions.converting}
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4" />
+                      {t.actions.startConversion}
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {isCompleted && (
+                <>
+                  <Button
+                    className="w-full gap-2 bg-cta text-cta-foreground hover:bg-cta/90"
+                    size="lg"
+                    onClick={() => setDownloadOpen(true)}
+                  >
+                    <Download className="h-4 w-4" />
+                    {t.actions.downloadModel}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="w-full gap-2"
+                    onClick={handleDownloadQuantities}
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    {t.actions.downloadQuantities}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* Main viewer area */}
+        <main className="flex-1 p-5">
+          <div className="h-full min-h-[500px]">
+            <Viewer3D
+              status={effectiveStatus}
+              progress={job?.progress ?? 0}
+              progressStep={job?.progressStep ?? 0}
+              progressMessage={job?.progressMessage ?? t.processing.step1}
+              floors={files.length || 1}
+              settings={settings}
+              onSettingsChange={setSettings}
+              resetViewTrigger={resetViewTrigger}
+              error={error}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
+
+      <Footer />
+
+      {/* Modals */}
+      <AboutModal open={aboutOpen} onOpenChange={setAboutOpen} />
+      <GuidelinesModal open={guidelinesOpen} onOpenChange={setGuidelinesOpen} />
+      <DownloadModal
+        open={downloadOpen}
+        onOpenChange={setDownloadOpen}
+        artifacts={artifacts}
+        jobId={job?.id ?? ""}
+      />
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <I18nProvider defaultLocale="ja">
+      <AppContent />
+    </I18nProvider>
   );
 }
