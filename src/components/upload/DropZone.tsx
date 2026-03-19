@@ -54,8 +54,12 @@ export function DropZone({ onFilesAdded, disabled }: DropZoneProps) {
     <div className="space-y-2">
       <div
         {...getRootProps()}
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-label={t.upload.description}
         className={cn(
-          "group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-all duration-200",
+          "group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 transition-all duration-200 sm:px-6 sm:py-10",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           isDragActive &&
             !isDragReject &&
             "border-cta bg-cta/5 scale-[1.01]",
@@ -100,7 +104,7 @@ export function DropZone({ onFilesAdded, disabled }: DropZoneProps) {
           {isDragActive || isDragReject ? "" : t.upload.description}
         </p>
         <p className="mt-2 text-[10px] text-muted-foreground/60">
-          PDF &middot; 最大 50MB
+          {t.upload.maxSize}
         </p>
       </div>
 

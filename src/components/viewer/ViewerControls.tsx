@@ -25,27 +25,32 @@ export function ViewerControls({
         size="icon-sm"
         onClick={() => onSettingsChange({ ...settings, cameraMode: "perspective" })}
         title={t.settings.perspective}
+        aria-label={t.settings.perspective}
+        aria-pressed={settings.cameraMode === "perspective"}
         className="bg-white/80 backdrop-blur-sm hover:bg-white"
       >
-        <Box className="h-3.5 w-3.5" />
+        <Box className="h-3.5 w-3.5" aria-hidden="true" />
       </Button>
       <Button
         variant={settings.cameraMode === "orthographic" ? "default" : "outline"}
         size="icon-sm"
         onClick={() => onSettingsChange({ ...settings, cameraMode: "orthographic" })}
         title={t.settings.orthographic}
+        aria-label={t.settings.orthographic}
+        aria-pressed={settings.cameraMode === "orthographic"}
         className="bg-white/80 backdrop-blur-sm hover:bg-white"
       >
-        <Grid3x3 className="h-3.5 w-3.5" />
+        <Grid3x3 className="h-3.5 w-3.5" aria-hidden="true" />
       </Button>
       <Button
         variant="outline"
         size="icon-sm"
         onClick={onResetView}
         title={t.settings.resetView}
+        aria-label={t.settings.resetView}
         className="bg-white/80 backdrop-blur-sm hover:bg-white"
       >
-        <RotateCcw className="h-3.5 w-3.5" />
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
       </Button>
     </div>
   );

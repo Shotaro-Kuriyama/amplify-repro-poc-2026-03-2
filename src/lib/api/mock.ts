@@ -37,6 +37,9 @@ interface MockJobState {
 
 const jobStates = new Map<string, MockJobState>();
 
+// Store file names by fileId so we can check at job creation time
+const fileNamesByFileId = new Map<string, string>();
+
 function getJobState(jobId: string): MockJobState {
   let state = jobStates.get(jobId);
   if (!state) {
@@ -55,9 +58,6 @@ function advanceJob(jobId: string): boolean {
   return state.step < MOCK_STEPS.length;
 }
 
-// Track whether uploaded files include a "fail" file (set at upload, consumed at job creation)
-let pendingShouldFail = false;
-
 const MOCK_QUANTITIES: QuantityRow[] = [
   { element: "壁", count: 24, unit: "本", totalLength: 87.5 },
   { element: "ドア", count: 8, unit: "枚", totalArea: 14.4 },
@@ -72,29 +72,33 @@ const MOCK_QUANTITIES: QuantityRow[] = [
 export const mockApi: AmplifyAPI = {
   async uploadPlans(req: UploadPlansRequest): Promise<UploadPlansResponse> {
     await sleep(800);
-    // If any filename contains "fail", mark the next job for failure
-    pendingShouldFail = req.files.some((f) =>
-      f.name.toLowerCase().includes("fail")
-    );
     const fileIds = req.files.map(
       (_, i) => `file-${Date.now()}-${i}`
     );
+    // Store file names so we can check at job creation time (not upload time)
+    req.files.forEach((f, i) => {
+      fileNamesByFileId.set(fileIds[i], f.name);
+    });
     return { fileIds };
   },
 
   async createAmplifyJob(req: CreateJobRequest): Promise<CreateJobResponse> {
     await sleep(500);
-    void req;
     const jobId = `job-${Date.now()}`;
 
-    // Initialize per-job state, consuming the pending fail flag
+    // Determine fail status from the actual fileIds at conversion time
+    // This ensures removing a "fail" file before conversion prevents failure
+    const shouldFail = req.fileIds.some((id) => {
+      const name = fileNamesByFileId.get(id);
+      return name ? name.toLowerCase().includes("fail") : false;
+    });
+
     const state: MockJobState = {
       progress: 0,
       step: 0,
-      shouldFail: pendingShouldFail,
+      shouldFail,
     };
     jobStates.set(jobId, state);
-    pendingShouldFail = false; // consumed — won't leak to next job
 
     return {
       job: {

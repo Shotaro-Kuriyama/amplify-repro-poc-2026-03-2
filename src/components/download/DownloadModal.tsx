@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Download, Loader2 } from "lucide-react";
+import { CheckCircle2, Download, Loader2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DownloadModalProps {
@@ -35,6 +35,14 @@ interface DownloadModalProps {
   artifacts: JobArtifact[];
   jobId: string;
 }
+
+type FormValues = {
+  name: string;
+  email: string;
+  country: string;
+  organizationType: string;
+  company: string;
+};
 
 export function DownloadModal({
   open,
@@ -46,14 +54,7 @@ export function DownloadModal({
   const [selectedFormat, setSelectedFormat] = useState<ArtifactFormat>("ifc");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-
-  type FormValues = {
-    name: string;
-    email: string;
-    country: string;
-    organizationType: string;
-    company: string;
-  };
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const schema = z.object({
     name: z.string().min(1, t.download.validation.nameRequired),
@@ -70,6 +71,7 @@ export function DownloadModal({
     register,
     handleSubmit,
     setValue,
+    reset: resetForm,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -82,12 +84,13 @@ export function DownloadModal({
     },
   });
 
-  const onSubmit = async (data: FormValues) => {
+  const onSubmit = useCallback(async (data: FormValues) => {
     const leadData: LeadFormData = {
       ...data,
       organizationType: data.organizationType as OrganizationType,
     };
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await api.submitLeadForm({ data: leadData, jobId });
       const blob = await api.downloadArtifact({ jobId, format: selectedFormat });
@@ -102,18 +105,24 @@ export function DownloadModal({
 
       setIsSuccess(true);
     } catch {
-      // Error handling would go here
+      setSubmitError(t.download.error);
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [jobId, selectedFormat, t.download.error]);
 
-  const handleClose = (v: boolean) => {
+  const handleClose = useCallback((v: boolean) => {
     if (!v) {
+      // Reset all state when closing so the modal is fresh next time
       setIsSuccess(false);
+      setSubmitError(null);
+      setSelectedFormat("ifc");
+      resetForm();
     }
     onOpenChange(v);
-  };
+  }, [onOpenChange, resetForm]);
+
+  const formatDescriptions = t.download.formatDescriptions;
 
   if (isSuccess) {
     return (
@@ -126,11 +135,14 @@ export function DownloadModal({
             <div>
               <h3 className="text-base font-semibold">{t.download.success}</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                {selectedFormat.toUpperCase()} 形式
+                {t.download.successDetail}
               </p>
+              <Badge variant="secondary" className="mt-2 text-xs">
+                {selectedFormat.toUpperCase()} — {formatDescriptions[selectedFormat]}
+              </Badge>
             </div>
             <Button variant="outline" onClick={() => handleClose(false)}>
-              閉じる
+              {t.download.close}
             </Button>
           </div>
         </DialogContent>
@@ -150,22 +162,28 @@ export function DownloadModal({
           {/* Format selection */}
           <div className="space-y-2">
             <Label className="text-xs">{t.download.format}</Label>
-            <div className="flex gap-2">
+            <div className="flex gap-2" role="radiogroup" aria-label={t.download.format}>
               {(["ifc", "rvt", "dwg"] as ArtifactFormat[]).map((fmt) => {
                 const artifact = artifacts.find((a) => a.format === fmt);
+                const isSelected = selectedFormat === fmt;
                 return (
                   <button
                     key={fmt}
                     type="button"
+                    role="radio"
+                    aria-checked={isSelected}
                     onClick={() => setSelectedFormat(fmt)}
                     className={cn(
-                      "flex flex-1 flex-col items-center gap-1 rounded-lg border p-3 text-sm font-medium transition-all",
-                      selectedFormat === fmt
+                      "flex flex-1 flex-col items-center gap-1 rounded-lg border p-3 text-sm font-medium transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      isSelected
                         ? "border-cta bg-cta/5 text-cta"
                         : "border-border hover:border-cta/30"
                     )}
                   >
                     <span className="text-xs font-bold uppercase">{fmt}</span>
+                    <span className="text-[9px] font-normal text-muted-foreground">
+                      {formatDescriptions[fmt]}
+                    </span>
                     {artifact && (
                       <Badge variant="secondary" className="text-[9px]">
                         {(artifact.size / 1_000_000).toFixed(1)} MB
@@ -184,9 +202,15 @@ export function DownloadModal({
             <Label htmlFor="dl-name" className="text-xs">
               {t.download.name}
             </Label>
-            <Input id="dl-name" {...register("name")} className="h-9" />
+            <Input
+              id="dl-name"
+              {...register("name")}
+              className="h-9"
+              aria-required="true"
+              aria-invalid={!!errors.name}
+            />
             {errors.name && (
-              <p className="text-xs text-destructive">{errors.name.message}</p>
+              <p className="text-xs text-destructive" role="alert">{errors.name.message}</p>
             )}
           </div>
 
@@ -200,17 +224,19 @@ export function DownloadModal({
               type="email"
               {...register("email")}
               className="h-9"
+              aria-required="true"
+              aria-invalid={!!errors.email}
             />
             {errors.email && (
-              <p className="text-xs text-destructive">{errors.email.message}</p>
+              <p className="text-xs text-destructive" role="alert">{errors.email.message}</p>
             )}
           </div>
 
           {/* Country */}
           <div className="space-y-1.5">
-            <Label className="text-xs">{t.download.country}</Label>
+            <Label htmlFor="dl-country" className="text-xs">{t.download.country}</Label>
             <Select onValueChange={(v: string | null) => { if (v) setValue("country", v); }}>
-              <SelectTrigger className="h-9">
+              <SelectTrigger className="h-9" id="dl-country" aria-required="true">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -222,15 +248,15 @@ export function DownloadModal({
               </SelectContent>
             </Select>
             {errors.country && (
-              <p className="text-xs text-destructive">{errors.country.message}</p>
+              <p className="text-xs text-destructive" role="alert">{errors.country.message}</p>
             )}
           </div>
 
           {/* Organization type */}
           <div className="space-y-1.5">
-            <Label className="text-xs">{t.download.organizationType}</Label>
+            <Label htmlFor="dl-orgtype" className="text-xs">{t.download.organizationType}</Label>
             <Select onValueChange={(v: string | null) => { if (v) setValue("organizationType", v); }}>
-              <SelectTrigger className="h-9">
+              <SelectTrigger className="h-9" id="dl-orgtype" aria-required="true">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -242,7 +268,7 @@ export function DownloadModal({
               </SelectContent>
             </Select>
             {errors.organizationType && (
-              <p className="text-xs text-destructive">
+              <p className="text-xs text-destructive" role="alert">
                 {errors.organizationType.message}
               </p>
             )}
@@ -253,23 +279,38 @@ export function DownloadModal({
             <Label htmlFor="dl-company" className="text-xs">
               {t.download.company}
             </Label>
-            <Input id="dl-company" {...register("company")} className="h-9" />
+            <Input
+              id="dl-company"
+              {...register("company")}
+              className="h-9"
+              aria-required="true"
+              aria-invalid={!!errors.company}
+            />
             {errors.company && (
-              <p className="text-xs text-destructive">
+              <p className="text-xs text-destructive" role="alert">
                 {errors.company.message}
               </p>
             )}
           </div>
 
+          {/* Error message */}
+          {submitError && (
+            <div className="flex items-center gap-2 rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {submitError}
+            </div>
+          )}
+
           <Button
             type="submit"
             className="w-full gap-2 bg-cta text-cta-foreground hover:bg-cta/90"
             disabled={isSubmitting}
+            aria-busy={isSubmitting}
           >
             {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
-              <Download className="h-4 w-4" />
+              <Download className="h-4 w-4" aria-hidden="true" />
             )}
             {t.download.submit}
           </Button>

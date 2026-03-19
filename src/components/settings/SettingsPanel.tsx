@@ -37,26 +37,29 @@ export function SettingsPanel({
 
       {/* Scale */}
       <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">{t.settings.scale}</Label>
+        <Label htmlFor="setting-scale" className="text-xs text-muted-foreground">{t.settings.scale}</Label>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">1 :</span>
+          <span className="text-xs text-muted-foreground" aria-hidden="true">1 :</span>
           <Input
+            id="setting-scale"
             type="number"
             value={settings.scale}
             onChange={(e) => update({ scale: Number(e.target.value) || 100 })}
             className="h-8 w-20 text-sm"
             min={1}
             max={500}
+            aria-describedby="scale-help"
           />
         </div>
-        <p className="text-[10px] text-muted-foreground/60">{t.settings.scaleHelp}</p>
+        <p id="scale-help" className="text-[10px] text-muted-foreground/60">{t.settings.scaleHelp}</p>
       </div>
 
       {/* Floor Height */}
       <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">{t.settings.floorHeight}</Label>
+        <Label htmlFor="setting-floor-height" className="text-xs text-muted-foreground">{t.settings.floorHeight}</Label>
         <div className="flex items-center gap-2">
           <Input
+            id="setting-floor-height"
             type="number"
             value={settings.floorHeight}
             onChange={(e) => update({ floorHeight: Number(e.target.value) || 2.8 })}
@@ -78,9 +81,8 @@ export function SettingsPanel({
         <Label className="text-xs text-muted-foreground">{t.settings.opacity}</Label>
         <Slider
           value={[settings.opacity * 100]}
-          onValueChange={(val: number | readonly number[]) => {
-            const v = Array.isArray(val) ? val[0] : val;
-            update({ opacity: v / 100 });
+          onValueChange={(val: number[]) => {
+            update({ opacity: val[0] / 100 });
           }}
           min={0}
           max={100}
@@ -104,18 +106,20 @@ export function SettingsPanel({
             variant={settings.cameraMode === "perspective" ? "default" : "outline"}
             size="sm"
             onClick={() => update({ cameraMode: "perspective" })}
+            aria-pressed={settings.cameraMode === "perspective"}
             className="flex-1 gap-1.5 text-xs"
           >
-            <Box className="h-3 w-3" />
+            <Box className="h-3 w-3" aria-hidden="true" />
             {t.settings.perspective}
           </Button>
           <Button
             variant={settings.cameraMode === "orthographic" ? "default" : "outline"}
             size="sm"
             onClick={() => update({ cameraMode: "orthographic" })}
+            aria-pressed={settings.cameraMode === "orthographic"}
             className="flex-1 gap-1.5 text-xs"
           >
-            <Grid3x3 className="h-3 w-3" />
+            <Grid3x3 className="h-3 w-3" aria-hidden="true" />
             {t.settings.orthographic}
           </Button>
         </div>

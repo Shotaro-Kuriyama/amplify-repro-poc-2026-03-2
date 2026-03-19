@@ -57,6 +57,7 @@ const ja = {
     fileAdded: "ファイルを追加しました",
     invalidType: "PDFファイルのみ対応しています",
     tooLarge: "ファイルサイズが上限を超えています（最大50MB）",
+    maxSize: "PDF · 最大 50MB",
   },
   storyManager: {
     title: "階層管理",
@@ -85,6 +86,8 @@ const ja = {
     downloadModel: "モデルをダウンロード",
     converting: "変換中…",
     cancel: "キャンセル",
+    reset: "リセット",
+    quantitiesSuccess: "数量表のダウンロードを開始しました",
   },
   processing: {
     title: "変換処理中",
@@ -110,6 +113,14 @@ const ja = {
     format: "出力形式",
     submit: "ダウンロード",
     success: "ダウンロードを開始しました",
+    successDetail: "ファイルのダウンロードが開始されました。",
+    close: "閉じる",
+    error: "ダウンロードに失敗しました。再度お試しください。",
+    formatDescriptions: {
+      ifc: "openBIM国際標準形式",
+      rvt: "Autodesk Revit形式",
+      dwg: "AutoCAD互換形式",
+    },
     orgTypes: {
       architect: "建築設計事務所",
       construction: "建設会社",
@@ -147,6 +158,7 @@ const ja = {
     processing: "変換中",
     completed: "変換完了",
     failed: "変換に失敗しました",
+    failedGuidance: "リセットして再度お試しください",
   },
   footer: {
     language: "言語",
@@ -157,6 +169,38 @@ const ja = {
     credit: "開発",
     relatedTools: "関連ツール",
     copyright: "© 2025 AmpliFy. All rights reserved.",
+  },
+  terms: {
+    title: "利用規約",
+    backToApp: "に戻る",
+    section1Title: "1. サービスの概要",
+    section1Body:
+      "AmpliFy（以下「本サービス」）は、建築平面図のPDFファイルをBIM 3Dモデルに変換するWebアプリケーションです。本サービスは現在開発中のモック版であり、実際の変換処理は行われません。",
+    section2Title: "2. 利用条件",
+    section2Body:
+      "本サービスの利用にあたり、ユーザーは以下の条件に同意するものとします。アップロードされたファイルは処理後に自動的に削除されます。",
+    section3Title: "3. 免責事項",
+    section3Body:
+      "本サービスで生成されるモデルの精度や完全性について、いかなる保証も行いません。本サービスの利用により生じた損害について、運営者は一切の責任を負いません。",
+    section4Title: "4. 知的財産",
+    section4Body:
+      "アップロードされた図面の著作権はユーザーに帰属します。生成されたモデルの利用権はユーザーに付与されます。",
+  },
+  privacy: {
+    title: "プライバシーポリシー",
+    backToApp: "に戻る",
+    section1Title: "1. 収集する情報",
+    section1Body:
+      "本サービスでは、モデルダウンロード時に以下の情報を収集する場合があります：氏名、メールアドレス、国・地域、組織種別、会社名。",
+    section2Title: "2. 情報の利用目的",
+    section2Body:
+      "収集した情報は、サービス改善およびユーザーサポートの目的にのみ使用されます。第三者への提供は行いません。",
+    section3Title: "3. データの保管と削除",
+    section3Body:
+      "アップロードされたPDFファイルは、処理完了後数時間以内に自動的に削除されます。ユーザーの明示的な同意がない限り、学習データとして使用されることはありません。",
+    section4Title: "4. ユーザーの権利",
+    section4Body:
+      "GDPRおよび各国のデータ保護法に基づき、ユーザーは自身のデータへのアクセス、訂正、削除を請求する権利を有します。",
   },
 };
 

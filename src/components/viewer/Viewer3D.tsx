@@ -181,7 +181,7 @@ export function Viewer3D({
 
       {/* Processing overlay */}
       {showProcessing && (
-        <div className="flex h-full flex-col items-center justify-center gap-6 px-8">
+        <div className="flex h-full flex-col items-center justify-center gap-6 px-8" role="status" aria-live="polite">
           <div className="relative">
             <div className="h-16 w-16 animate-pulse rounded-2xl bg-cta/10" />
             <Building2 className="absolute inset-0 m-auto h-8 w-8 text-cta" />
@@ -234,9 +234,9 @@ export function Viewer3D({
 
       {/* Error state */}
       {showError && (
-        <div className="flex h-full flex-col items-center justify-center gap-4 px-8">
+        <div className="flex h-full flex-col items-center justify-center gap-4 px-8" role="alert">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10">
-            <AlertTriangle className="h-7 w-7 text-destructive" />
+            <AlertTriangle className="h-7 w-7 text-destructive" aria-hidden="true" />
           </div>
           <div className="text-center">
             <h3 className="text-sm font-semibold text-foreground">
@@ -244,6 +244,9 @@ export function Viewer3D({
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               {error ?? "不明なエラーが発生しました"}
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground/70">
+              {t.status.failedGuidance}
             </p>
           </div>
         </div>

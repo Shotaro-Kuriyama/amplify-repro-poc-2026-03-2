@@ -33,6 +33,7 @@ import {
   Loader2,
   Sparkles,
   Upload,
+  CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +81,9 @@ function AppContent() {
   // Trigger counter for resetting the 3D view (OrbitControls position/rotation/zoom)
   const [resetViewTrigger, setResetViewTrigger] = useState(0);
 
+  // Quantities download success feedback
+  const [quantitiesSuccess, setQuantitiesSuccess] = useState(false);
+
   // ── Derived state: the real status considering files + job lifecycle ──
   const effectiveStatus: JobStatus = useMemo(() => {
     // Job lifecycle states take priority
@@ -108,6 +112,7 @@ function AppContent() {
   const handleReset = useCallback(() => {
     reset();
     clearFiles();
+    setQuantitiesSuccess(false);
   }, [reset, clearFiles]);
 
   const handleResetView = useCallback(() => {
@@ -131,6 +136,8 @@ function AppContent() {
       a.download = "quantities.csv";
       a.click();
       URL.revokeObjectURL(url);
+      setQuantitiesSuccess(true);
+      setTimeout(() => setQuantitiesSuccess(false), 3000);
     } catch {
       // Silently fail for mock
     }
@@ -143,11 +150,11 @@ function AppContent() {
       {/* Hero — only when completely idle */}
       {effectiveStatus === "idle" && (
         <div className="border-b border-border/40 bg-gradient-to-b from-white to-background">
-          <div className="mx-auto max-w-screen-2xl px-6 py-12 text-center">
+          <div className="mx-auto max-w-screen-2xl px-4 py-8 text-center sm:px-6 sm:py-12">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-cta/10">
               <Sparkles className="h-6 w-6 text-cta" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl lg:text-3xl">
               {t.app.tagline}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
@@ -157,11 +164,11 @@ function AppContent() {
         </div>
       )}
 
-      {/* Main content */}
-      <div className="mx-auto flex w-full max-w-screen-2xl flex-1 gap-0">
-        {/* Left sidebar */}
-        <aside className="w-80 shrink-0 border-r border-border/40 bg-white">
-          <div className="flex h-full flex-col overflow-y-auto p-5">
+      {/* Main content — vertical stack on mobile, horizontal on desktop */}
+      <div className="mx-auto flex w-full max-w-screen-2xl flex-1 flex-col lg:flex-row">
+        {/* Left sidebar → top section on mobile */}
+        <aside className="w-full shrink-0 border-b border-border/40 bg-white lg:w-80 lg:border-b-0 lg:border-r">
+          <div className="flex flex-col overflow-y-auto p-4 sm:p-5 lg:h-full">
             {/* Upload zone */}
             <div className="space-y-4">
               <DropZone
@@ -171,9 +178,12 @@ function AppContent() {
 
               {/* Uploading indicator */}
               {isUploading && (
-                <div className="flex items-center gap-2 rounded-lg bg-cta/5 px-3 py-2 text-xs text-cta">
-                  <Upload className="h-3.5 w-3.5 animate-pulse" />
-                  アップロード中…
+                <div
+                  className="flex items-center gap-2 rounded-lg bg-cta/5 px-3 py-2 text-xs text-cta"
+                  role="status"
+                >
+                  <Upload className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
+                  {t.status.uploading}…
                 </div>
               )}
 
@@ -202,13 +212,13 @@ function AppContent() {
               </>
             )}
 
-            {/* Spacer */}
-            <div className="flex-1" />
+            {/* Spacer — only on desktop to push action bar to bottom */}
+            <div className="hidden flex-1 lg:block" />
 
             {/* Action bar */}
             <div className="mt-5 space-y-2.5 border-t border-border/40 pt-5">
               {/* Status badge */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between" role="status" aria-live="polite">
                 <Badge
                   variant="secondary"
                   className={cn(
@@ -229,28 +239,36 @@ function AppContent() {
                     onClick={handleReset}
                     className="gap-1 text-[10px] text-muted-foreground"
                   >
-                    <RotateCcw className="h-3 w-3" />
-                    リセット
+                    <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                    {t.actions.reset}
                   </Button>
                 )}
               </div>
 
+              {/* Failed guidance */}
+              {isFailed && (
+                <p className="text-[11px] text-muted-foreground">
+                  {t.status.failedGuidance}
+                </p>
+              )}
+
               {/* Conversion / download actions */}
-              {!isCompleted && (
+              {!isCompleted && !isFailed && (
                 <Button
                   className="w-full gap-2 bg-cta text-cta-foreground hover:bg-cta/90"
                   size="lg"
                   disabled={!canStart}
                   onClick={handleStartConversion}
+                  aria-busy={isProcessing}
                 >
                   {isProcessing ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                       {t.actions.converting}
                     </>
                   ) : (
                     <>
-                      <Play className="h-4 w-4" />
+                      <Play className="h-4 w-4" aria-hidden="true" />
                       {t.actions.startConversion}
                     </>
                   )}
@@ -264,7 +282,7 @@ function AppContent() {
                     size="lg"
                     onClick={() => setDownloadOpen(true)}
                   >
-                    <Download className="h-4 w-4" />
+                    <Download className="h-4 w-4" aria-hidden="true" />
                     {t.actions.downloadModel}
                   </Button>
                   <Button
@@ -273,9 +291,16 @@ function AppContent() {
                     className="w-full gap-2"
                     onClick={handleDownloadQuantities}
                   >
-                    <FileSpreadsheet className="h-4 w-4" />
+                    <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
                     {t.actions.downloadQuantities}
                   </Button>
+                  {/* Quantities success feedback */}
+                  {quantitiesSuccess && (
+                    <div className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-600" role="status">
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t.actions.quantitiesSuccess}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -283,8 +308,8 @@ function AppContent() {
         </aside>
 
         {/* Main viewer area */}
-        <main className="flex-1 p-5">
-          <div className="h-full min-h-[500px]">
+        <main className="flex-1 p-3 sm:p-5">
+          <div className="h-full min-h-[350px] sm:min-h-[450px] lg:min-h-[500px]">
             <Viewer3D
               status={effectiveStatus}
               progress={job?.progress ?? 0}

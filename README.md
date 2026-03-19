@@ -81,18 +81,18 @@ src/
 ## 状態遷移
 
 ```
-idle → uploaded → ready → processing → completed
-                                     → failed
+idle → uploading → ready → processing → completed
+                                      → failed
 ```
 
 | 状態 | 説明 |
 |---|---|
 | idle | 初期状態。ファイル未アップロード |
-| uploaded | ファイルアップロード中 |
+| uploading | ファイルアップロード中 |
 | ready | アップロード完了、変換可能 |
 | processing | 変換処理中（4段階のステップ表示） |
 | completed | 変換完了、3Dモデル表示・ダウンロード可能 |
-| failed | 変換失敗 |
+| failed | 変換失敗（リセットして再試行可能） |
 
 ## API境界
 
@@ -113,7 +113,7 @@ idle → uploaded → ready → processing → completed
 
 | 機能 | モック内容 |
 |---|---|
-| PDF→BIM変換 | setTimeout ベースのフェイク進捗（ファイル名に「fail」を含むと失敗デモ） |
+| PDF→BIM変換 | setTimeout ベースのフェイク進捗（変換開始時のファイル名に「fail」を含むと失敗デモ） |
 | 3Dモデル表示 | 壁・窓・ドアのプロシージャルボックスモデル |
 | スケール自動検出 | 固定値 (1:100) |
 | ファイルダウンロード | ダミー Blob |
