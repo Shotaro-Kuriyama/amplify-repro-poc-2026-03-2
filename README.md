@@ -96,18 +96,31 @@ idle → uploading → ready → processing → completed
 
 ## API境界
 
-`src/lib/api/client.ts` がアプリ全体の API 窓口です。現在は `mock.ts` にディスパッチしていますが、将来は実APIクライアントに差し替えるだけで接続できます。
+`src/lib/api/client.ts` がアプリ全体の API 窓口です。現在は `mock.ts` にディスパッチしていますが、将来は実APIクライアントに差し替えるだけで接続できます。全レスポンスは Zod スキーマ（`schemas.ts`）で runtime 検証されます。
+
+詳細な API 契約は **[docs/api-contract.md](docs/api-contract.md)** を参照してください。
 
 ### 定義済みAPI関数
 
 | 関数 | 用途 |
 |---|---|
-| `uploadPlans(files)` | PDF図面をアップロード |
-| `createAmplifyJob(payload)` | 変換ジョブを作成 |
-| `getAmplifyJob(jobId)` | ジョブの状態・進捗を取得 |
+| `uploadPlans(files)` | PDF図面をアップロード → ファイルメタデータを返却 |
+| `createAmplifyJob(payload)` | 変換ジョブを作成 → ジョブID・初期状態を返却 |
+| `getAmplifyJob(jobId)` | ジョブの状態・進捗・成果物を取得 |
 | `downloadArtifact(jobId, format)` | モデルファイルをダウンロード |
 | `downloadQuantities(jobId)` | 数量表データを取得 |
-| `submitLeadForm(payload)` | ダウンロード前フォームを送信 |
+| `submitLeadForm(payload)` | リード情報を送信 → 送信IDを返却 |
+
+### API層の構成
+
+| ファイル | 役割 |
+|---|---|
+| `types.ts` | API request/response 型定義 |
+| `schemas.ts` | Zod runtime validation スキーマ |
+| `errors.ts` | エラーコード・ApiError クラス |
+| `mock.ts` | 契約準拠のモック実装 |
+| `client.ts` | Zod 検証付き API クライアント |
+| `endpoints.ts` | REST エンドポイント URL 定義 |
 
 ## モック化箇所
 

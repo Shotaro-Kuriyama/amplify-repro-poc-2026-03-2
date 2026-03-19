@@ -1,34 +1,76 @@
-import type {
-  AmplifyJob,
-  ArtifactFormat,
-  ConversionSettings,
-  JobArtifact,
-  LeadFormData,
-  QuantityRow,
-} from "@/types";
+import type { ArtifactFormat, QuantityRow } from "@/types";
 
-// ── Request types ──
+// ── API domain types (backend concepts) ──
+
+/** Job status as returned by the backend API */
+export type ApiJobStatus = "queued" | "processing" | "completed" | "failed";
+
+/** Processing step identifiers — backend reports which step the job is in */
+export type ApiProcessingStep =
+  | "analyzing_plans"
+  | "detecting_walls_and_openings"
+  | "building_3d_model"
+  | "preparing_artifacts";
+
+/** Standardized API error payload */
+export interface ApiErrorPayload {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/** File metadata returned after upload */
+export interface UploadedFileMeta {
+  fileId: string;
+  originalName: string;
+  size: number;
+  mimeType: string;
+  uploadedAt: string;
+}
+
+/** Artifact metadata within a job response */
+export interface ApiJobArtifact {
+  id: string;
+  format: ArtifactFormat;
+  fileName: string;
+  size: number;
+}
+
+// ── Request / Response types ──
 
 export interface UploadPlansRequest {
   files: File[];
 }
 
 export interface UploadPlansResponse {
-  fileIds: string[];
+  files: UploadedFileMeta[];
 }
 
 export interface CreateJobRequest {
   fileIds: string[];
-  settings: ConversionSettings;
+  settings: {
+    scale: number;
+    floorHeight: number;
+  };
 }
 
 export interface CreateJobResponse {
-  job: AmplifyJob;
+  jobId: string;
+  status: ApiJobStatus;
+  fileIds: string[];
+  createdAt: string;
 }
 
 export interface GetJobResponse {
-  job: AmplifyJob;
-  artifacts?: JobArtifact[];
+  jobId: string;
+  status: ApiJobStatus;
+  progress: number;
+  currentStep: ApiProcessingStep | null;
+  artifacts: ApiJobArtifact[] | null;
+  quantitiesReady: boolean;
+  error: ApiErrorPayload | null;
+  createdAt: string;
+  completedAt: string | null;
 }
 
 export interface DownloadArtifactRequest {
@@ -45,8 +87,19 @@ export interface DownloadQuantitiesResponse {
 }
 
 export interface SubmitLeadFormRequest {
-  data: LeadFormData;
-  jobId?: string;
+  data: {
+    name: string;
+    email: string;
+    country: string;
+    organizationType: string;
+    company: string;
+  };
+  jobId: string;
+}
+
+export interface SubmitLeadFormResponse {
+  submissionId: string;
+  submittedAt: string;
 }
 
 // ── API interface ──
@@ -57,5 +110,5 @@ export interface AmplifyAPI {
   getAmplifyJob(jobId: string): Promise<GetJobResponse>;
   downloadArtifact(req: DownloadArtifactRequest): Promise<Blob>;
   downloadQuantities(req: DownloadQuantitiesRequest): Promise<DownloadQuantitiesResponse>;
-  submitLeadForm(req: SubmitLeadFormRequest): Promise<void>;
+  submitLeadForm(req: SubmitLeadFormRequest): Promise<SubmitLeadFormResponse>;
 }

@@ -74,9 +74,9 @@ export interface QuantityRow {
   totalLength?: number;
 }
 
-// ── Processing steps ──
-export interface ProcessingStep {
+// ── Processing steps (UI display + mock timing config) ──
+export interface ProcessingStepConfig {
   key: string;
   label: string;
-  duration: number; // ms for mock
+  duration: number; // ms for mock polling interval
 }

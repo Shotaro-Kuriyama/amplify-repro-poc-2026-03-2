@@ -41,14 +41,14 @@ export function useFileUpload() {
   const addFiles = useCallback(async (newFiles: File[]) => {
     setIsUploading(true);
     try {
-      // API returns server-side IDs — these become the canonical IDs.
-      const { fileIds: serverIds } = await api.uploadPlans({ files: newFiles });
+      // API returns file metadata including server-assigned IDs
+      const { files: uploadedMeta } = await api.uploadPlans({ files: newFiles });
 
       setFiles((prev) => {
         const additions: UploadedFile[] = newFiles.map((file, i) => ({
-          id: serverIds[i],
-          name: file.name,
-          size: file.size,
+          id: uploadedMeta[i].fileId,
+          name: uploadedMeta[i].originalName,
+          size: uploadedMeta[i].size,
           file,
           floor: 0,
           label: "",

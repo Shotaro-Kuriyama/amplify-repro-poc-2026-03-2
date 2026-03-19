@@ -314,7 +314,7 @@ function AppContent() {
               status={effectiveStatus}
               progress={job?.progress ?? 0}
               progressStep={job?.progressStep ?? 0}
-              progressMessage={job?.progressMessage ?? t.processing.step1}
+              progressMessage={[t.processing.step1, t.processing.step2, t.processing.step3, t.processing.step4][job?.progressStep ?? 0]}
               floors={files.length || 1}
               settings={settings}
               onSettingsChange={setSettings}

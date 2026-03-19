@@ -2,8 +2,52 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AmplifyJob, ConversionSettings, JobArtifact, JobStatus } from "@/types";
+import type { ApiJobStatus, ApiProcessingStep, GetJobResponse } from "@/lib/api/types";
 import { api } from "@/lib/api/client";
+import { normalizeError } from "@/lib/api/errors";
 import { PROCESSING_STEPS } from "@/lib/constants";
+
+// ── API → UI mapping ──
+
+/** Map backend job status to UI job status */
+function mapApiStatus(apiStatus: ApiJobStatus): JobStatus {
+  if (apiStatus === "queued") return "processing";
+  return apiStatus; // processing, completed, failed map directly
+}
+
+/** Map API processing step to step index (0-based) */
+const STEP_INDEX_MAP: Record<ApiProcessingStep, number> = {
+  analyzing_plans: 0,
+  detecting_walls_and_openings: 1,
+  building_3d_model: 2,
+  preparing_artifacts: 3,
+};
+
+/** Map a GetJobResponse to UI-facing AmplifyJob + artifacts */
+function mapGetJobResponse(res: GetJobResponse): {
+  job: AmplifyJob;
+  artifacts: JobArtifact[];
+} {
+  const stepIndex = res.currentStep
+    ? STEP_INDEX_MAP[res.currentStep]
+    : 0;
+
+  return {
+    job: {
+      id: res.jobId,
+      status: mapApiStatus(res.status),
+      progress: res.progress,
+      progressStep: stepIndex,
+      progressMessage: "", // UI derives from stepIndex + i18n
+      createdAt: res.createdAt,
+      completedAt: res.completedAt ?? undefined,
+      error: res.error?.message,
+    },
+    artifacts: res.artifacts ?? [],
+  };
+}
+
+// ── Hook ──
 
 interface UseAmplifyJobReturn {
   status: JobStatus;
@@ -35,17 +79,18 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
     pollFnRef.current = async (jobId: string, stepIndex: number) => {
       try {
         const res = await api.getAmplifyJob(jobId);
-        setJob(res.job);
+        const mapped = mapGetJobResponse(res);
+        setJob(mapped.job);
 
-        if (res.job.status === "completed") {
+        if (res.status === "completed") {
           setStatus("completed");
-          setArtifacts(res.artifacts ?? []);
+          setArtifacts(mapped.artifacts);
           return;
         }
 
-        if (res.job.status === "failed") {
+        if (res.status === "failed") {
           setStatus("failed");
-          setError(res.job.error ?? "変換中にエラーが発生しました");
+          setError(res.error?.message ?? "変換中にエラーが発生しました");
           return;
         }
 
@@ -56,8 +101,9 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
           pollFnRef.current?.(jobId, nextStep);
         }, delay);
       } catch (err) {
+        const apiErr = normalizeError(err);
         setStatus("failed");
-        setError(err instanceof Error ? err.message : "不明なエラーが発生しました");
+        setError(apiErr.message);
       }
     };
   }, []);
@@ -70,20 +116,36 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
       setArtifacts([]);
 
       try {
-        const { job: newJob } = await api.createAmplifyJob({
+        // Only send conversion-relevant settings to the API
+        // (opacity and cameraMode are UI-only concerns)
+        const res = await api.createAmplifyJob({
           fileIds,
-          settings,
+          settings: {
+            scale: settings.scale,
+            floorHeight: settings.floorHeight,
+          },
         });
-        setJob(newJob);
+
+        // Map createJob response to initial UI job state
+        const initialJob: AmplifyJob = {
+          id: res.jobId,
+          status: mapApiStatus(res.status),
+          progress: 0,
+          progressStep: 0,
+          progressMessage: "",
+          createdAt: res.createdAt,
+        };
+        setJob(initialJob);
 
         // Start polling for progress
         const delay = PROCESSING_STEPS[0]?.duration ?? 2000;
         pollingRef.current = setTimeout(() => {
-          pollFnRef.current?.(newJob.id, 0);
+          pollFnRef.current?.(res.jobId, 0);
         }, delay);
       } catch (err) {
+        const apiErr = normalizeError(err);
         setStatus("failed");
-        setError(err instanceof Error ? err.message : "ジョブの作成に失敗しました");
+        setError(apiErr.message);
       }
     },
     [stopPolling]
