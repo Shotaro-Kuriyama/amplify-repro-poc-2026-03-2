@@ -1,5 +1,6 @@
 import type { AmplifyAPI } from "./types";
 import { mockApi } from "./mock";
+import { realApi } from "./real";
 import {
   uploadPlansResponseSchema,
   createJobResponseSchema,
@@ -45,11 +46,23 @@ function createValidatedApi(impl: AmplifyAPI): AmplifyAPI {
 }
 
 /**
- * API client.
+ * API mode selection.
  *
- * Currently dispatches to mock implementations with runtime validation.
- * To connect a real backend, replace `mockApi` with an implementation
- * that calls actual endpoints defined in `./endpoints.ts`.
- * The same Zod validation will verify the real backend's responses.
+ * - "mock"  : Direct function calls to mock.ts (no network, Phase 6 behavior)
+ * - "real"  : HTTP fetch to Route Handlers (/api/*) backed by in-memory store
+ *
+ * Set via NEXT_PUBLIC_API_MODE environment variable.
+ * Default: "real" (uses Route Handlers)
  */
-export const api: AmplifyAPI = createValidatedApi(mockApi);
+const apiMode = process.env.NEXT_PUBLIC_API_MODE ?? "real";
+
+const baseImpl: AmplifyAPI = apiMode === "mock" ? mockApi : realApi;
+
+/**
+ * API client — Zod-validated, mode-switchable.
+ *
+ * Switch between mock and real by setting:
+ *   NEXT_PUBLIC_API_MODE=mock   → direct mock calls (no HTTP)
+ *   NEXT_PUBLIC_API_MODE=real   → fetch to /api/* Route Handlers
+ */
+export const api: AmplifyAPI = createValidatedApi(baseImpl);

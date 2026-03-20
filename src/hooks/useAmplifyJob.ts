@@ -5,11 +5,19 @@ import type { AmplifyJob, ConversionSettings, JobArtifact, JobStatus } from "@/t
 import type { ApiJobStatus, ApiProcessingStep, GetJobResponse } from "@/lib/api/types";
 import { api } from "@/lib/api/client";
 import { normalizeError } from "@/lib/api/errors";
-import { PROCESSING_STEPS } from "@/lib/constants";
+
+// ── Polling config ──
+
+/** How often to poll getAmplifyJob while processing (ms) */
+const POLL_INTERVAL = 1500;
 
 // ── API → UI mapping ──
 
-/** Map backend job status to UI job status */
+/**
+ * Map backend job status to UI job status.
+ * `queued` is treated as `processing` in the UI — the user sees
+ * a single "converting" state regardless of backend queue handling.
+ */
 function mapApiStatus(apiStatus: ApiJobStatus): JobStatus {
   if (apiStatus === "queued") return "processing";
   return apiStatus; // processing, completed, failed map directly
@@ -65,7 +73,7 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
   const [error, setError] = useState<string | null>(null);
 
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollFnRef = useRef<((jobId: string, stepIndex: number) => void) | null>(null);
+  const pollFnRef = useRef<((jobId: string) => void) | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -74,9 +82,9 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
     }
   }, []);
 
-  // Keep the polling function in a ref to avoid the circular dependency
+  // Keep the polling function in a ref to avoid circular dependency
   useEffect(() => {
-    pollFnRef.current = async (jobId: string, stepIndex: number) => {
+    pollFnRef.current = async (jobId: string) => {
       try {
         const res = await api.getAmplifyJob(jobId);
         const mapped = mapGetJobResponse(res);
@@ -94,12 +102,10 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
           return;
         }
 
-        const nextStep = Math.min(stepIndex + 1, PROCESSING_STEPS.length - 1);
-        const delay = PROCESSING_STEPS[stepIndex]?.duration ?? 2000;
-
+        // Continue polling at fixed interval
         pollingRef.current = setTimeout(() => {
-          pollFnRef.current?.(jobId, nextStep);
-        }, delay);
+          pollFnRef.current?.(jobId);
+        }, POLL_INTERVAL);
       } catch (err) {
         const apiErr = normalizeError(err);
         setStatus("failed");
@@ -138,10 +144,9 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
         setJob(initialJob);
 
         // Start polling for progress
-        const delay = PROCESSING_STEPS[0]?.duration ?? 2000;
         pollingRef.current = setTimeout(() => {
-          pollFnRef.current?.(res.jobId, 0);
-        }, delay);
+          pollFnRef.current?.(res.jobId);
+        }, POLL_INTERVAL);
       } catch (err) {
         const apiErr = normalizeError(err);
         setStatus("failed");

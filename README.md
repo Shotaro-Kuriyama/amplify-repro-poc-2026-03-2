@@ -49,33 +49,46 @@ npm run dev       # 開発サーバー起動
 
 ```
 src/
-├── app/                  # Next.js App Router ページ
-│   ├── page.tsx          # メインアプリ
-│   ├── terms/page.tsx    # 利用規約
-│   └── privacy/page.tsx  # プライバシーポリシー
+├── app/
+│   ├── page.tsx            # メインアプリ
+│   ├── terms/page.tsx      # 利用規約
+│   ├── privacy/page.tsx    # プライバシーポリシー
+│   └── api/                # Route Handlers（擬似 backend）
+│       ├── plans/upload/   # POST: ファイルアップロード
+│       ├── jobs/           # POST: ジョブ作成
+│       │   └── [jobId]/    # GET: ジョブ状態取得
+│       │       ├── artifacts/[format]/  # GET: 成果物ダウンロード
+│       │       └── quantities/          # GET: 数量表取得
+│       └── leads/          # POST: リード情報送信
 ├── components/
-│   ├── layout/           # Header, Footer, AboutModal
-│   ├── upload/           # DropZone, FileList
-│   ├── multi-story/      # StoryManager（階層管理）
-│   ├── viewer/           # Viewer3D, BuildingModel, ViewerControls
-│   ├── settings/         # SettingsPanel
-│   ├── download/         # DownloadModal
-│   ├── guidelines/       # GuidelinesModal
-│   └── ui/               # shadcn/ui コンポーネント
+│   ├── layout/             # Header, Footer, AboutModal
+│   ├── upload/             # DropZone, FileList
+│   ├── multi-story/        # StoryManager（階層管理）
+│   ├── viewer/             # Viewer3D, BuildingModel, ViewerControls
+│   ├── settings/           # SettingsPanel
+│   ├── download/           # DownloadModal
+│   ├── guidelines/         # GuidelinesModal
+│   └── ui/                 # shadcn/ui コンポーネント
 ├── hooks/
-│   ├── useAmplifyJob.ts  # ジョブ状態管理（idle→processing→completed/failed）
-│   └── useFileUpload.ts  # ファイルアップロード管理
+│   ├── useAmplifyJob.ts    # ジョブ状態管理 + API polling
+│   └── useFileUpload.ts    # ファイルアップロード管理
 ├── lib/
 │   ├── api/
-│   │   ├── client.ts     # API窓口（→ mock.ts を差し替えで本番接続可能）
-│   │   ├── mock.ts       # モック実装
-│   │   ├── types.ts      # API 入出力型
-│   │   └── endpoints.ts  # エンドポイントURL定義
-│   ├── i18n/             # 辞書ベース i18n（ja/en）
+│   │   ├── client.ts       # API窓口（mock/real 切替 + Zod 検証）
+│   │   ├── real.ts         # fetch ベース API クライアント
+│   │   ├── mock.ts         # モック実装（直接呼び出し）
+│   │   ├── types.ts        # API 入出力型
+│   │   ├── schemas.ts      # Zod runtime validation
+│   │   ├── errors.ts       # エラーコード・ApiError
+│   │   └── endpoints.ts    # エンドポイント URL 定義
+│   ├── server/
+│   │   ├── store.ts        # in-memory データストア
+│   │   └── helpers.ts      # Route Handler 共通ヘルパー
+│   ├── i18n/               # 辞書ベース i18n（ja/en）
 │   ├── constants.ts
 │   └── utils.ts
 └── types/
-    └── index.ts          # 共通型定義
+    └── index.ts            # 共通型定義
 ```
 
 ## 状態遷移
@@ -96,7 +109,7 @@ idle → uploading → ready → processing → completed
 
 ## API境界
 
-`src/lib/api/client.ts` がアプリ全体の API 窓口です。現在は `mock.ts` にディスパッチしていますが、将来は実APIクライアントに差し替えるだけで接続できます。全レスポンスは Zod スキーマ（`schemas.ts`）で runtime 検証されます。
+`src/lib/api/client.ts` がアプリ全体の API 窓口です。デフォルトでは `real.ts`（fetch ベース）経由で Next.js Route Handlers を呼びます。`NEXT_PUBLIC_API_MODE=mock` で `mock.ts` 直呼びに切替可能です。全レスポンスは Zod スキーマ（`schemas.ts`）で runtime 検証されます。
 
 詳細な API 契約は **[docs/api-contract.md](docs/api-contract.md)** を参照してください。
 
@@ -118,20 +131,44 @@ idle → uploading → ready → processing → completed
 | `types.ts` | API request/response 型定義 |
 | `schemas.ts` | Zod runtime validation スキーマ |
 | `errors.ts` | エラーコード・ApiError クラス |
-| `mock.ts` | 契約準拠のモック実装 |
-| `client.ts` | Zod 検証付き API クライアント |
+| `mock.ts` | 契約準拠のモック実装（`NEXT_PUBLIC_API_MODE=mock` 時） |
+| `real.ts` | fetch ベース API クライアント（デフォルト） |
+| `client.ts` | モード切替 + Zod 検証付き API 窓口 |
 | `endpoints.ts` | REST エンドポイント URL 定義 |
+
+## APIモード切替
+
+```bash
+# real API モード（デフォルト）— Route Handlers 経由
+npm run dev
+
+# mock モード — mock.ts 直呼び（HTTP なし）
+NEXT_PUBLIC_API_MODE=mock npm run dev
+```
+
+### 擬似 backend（Route Handlers）
+
+| ルート | メソッド | 対応 API |
+|---|---|---|
+| `/api/plans/upload` | POST | uploadPlans |
+| `/api/jobs` | POST | createAmplifyJob |
+| `/api/jobs/[jobId]` | GET | getAmplifyJob |
+| `/api/jobs/[jobId]/artifacts/[format]` | GET | downloadArtifact |
+| `/api/jobs/[jobId]/quantities` | GET | downloadQuantities |
+| `/api/leads` | POST | submitLeadForm |
+
+in-memory store（`src/lib/server/store.ts`）で状態管理。サーバー再起動でデータ消失。
 
 ## モック化箇所
 
 | 機能 | モック内容 |
 |---|---|
-| PDF→BIM変換 | setTimeout ベースのフェイク進捗（変換開始時のファイル名に「fail」を含むと失敗デモ） |
+| PDF→BIM変換 | 時間ベースの擬似進捗（約10秒で完了、ファイル名に「fail」を含むと5秒で失敗） |
 | 3Dモデル表示 | 壁・窓・ドアのプロシージャルボックスモデル |
 | スケール自動検出 | 固定値 (1:100) |
-| ファイルダウンロード | ダミー Blob |
+| ファイルダウンロード | ダミーバイナリ |
 | 数量表 | ハードコードされたサンプルデータ |
-| フォーム送信 | 遅延のみ、データ永続化なし |
+| フォーム送信 | in-memory 保存のみ |
 
 ## 失敗状態のデモ
 
@@ -170,9 +207,10 @@ zip -r amplify-mock.zip amplify-mock/ \
 ## 開発コマンド
 
 ```bash
-npm install      # 依存パッケージインストール
-npm run dev      # 開発サーバー起動
-npm run build    # プロダクションビルド（型チェック含む）
-npm run lint     # ESLint 実行
-npm start        # プロダクションサーバー起動
+npm install                        # 依存パッケージインストール
+npm run dev                        # 開発サーバー起動（real API モード）
+NEXT_PUBLIC_API_MODE=mock npm run dev  # mock モードで起動
+npm run build                      # プロダクションビルド（型チェック含む）
+npm run lint                       # ESLint 実行
+npm start                          # プロダクションサーバー起動
 ```

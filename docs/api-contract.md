@@ -90,11 +90,7 @@ AmpliFy フロントエンドモックの API 契約定義。
 
 **Response:** `Blob`
 
-> **Phase 7 決定事項メモ**: 現在の mock は `Blob` を直接返却しているが、実バックエンド接続時には以下の 2 択を検討すること。
-> 1. **Blob 直返し** — `fetch` で `response.blob()` を取得し、そのまま返す（現行と同じ interface）
-> 2. **downloadUrl 返却** — レスポンスを `{ downloadUrl: string; expiresAt: string }` にし、クライアント側で URL を開く
->
-> 選択基準: ファイルサイズが大きい場合や署名付き URL（S3 presigned URL 等）を使う場合は downloadUrl 方式が適切。Phase 7 の最初にバックエンドのストレージ設計と合わせて決定する。
+> **Phase 7 確定**: 案A（直接ファイルレスポンス）を採用。Route Handler が `Response` でバイナリを返し、client は `res.blob()` で受け取る。Phase 8 以降で S3 presigned URL 方式に移行する場合は、`real.ts` の `downloadArtifact` をリダイレクト or URL 返却に変更する。
 
 ### 5. downloadQuantities
 
@@ -199,6 +195,75 @@ API が返す `currentStep` の値:
 `src/lib/api/schemas.ts` に全レスポンスの Zod スキーマが定義されています。
 `client.ts` がレスポンスを `schema.parse()` で検証するため、mock/実 API どちらでも型安全性が保証されます。
 
+## API モード
+
+`client.ts` は環境変数 `NEXT_PUBLIC_API_MODE` で API 実装を切り替えます。
+
+| 値 | 挙動 | 用途 |
+|---|---|---|
+| `real`（デフォルト） | `fetch` で Route Handlers (`/api/*`) を呼ぶ | 通常開発・デモ |
+| `mock` | `mock.ts` を直接呼ぶ（HTTP なし） | Phase 6 以前の動作確認・単体テスト |
+
+切り替え方法:
+```bash
+# real API モード（デフォルト）
+npm run dev
+
+# mock モード
+NEXT_PUBLIC_API_MODE=mock npm run dev
+```
+
+## Real API（Route Handlers）
+
+Phase 7 で導入された `fetch` ベースの擬似 backend です。
+
+### 構成
+
+| ルート | メソッド | 対応 API |
+|---|---|---|
+| `/api/plans/upload` | POST | uploadPlans |
+| `/api/jobs` | POST | createAmplifyJob |
+| `/api/jobs/[jobId]` | GET | getAmplifyJob |
+| `/api/jobs/[jobId]/artifacts/[format]` | GET | downloadArtifact |
+| `/api/jobs/[jobId]/quantities` | GET | downloadQuantities |
+| `/api/leads` | POST | submitLeadForm |
+
+### In-memory Store
+
+`src/lib/server/store.ts` が擬似 backend のデータ層です。
+
+- `fileStore`: アップロード済みファイルメタデータ
+- `jobStore`: ジョブ状態（作成時刻ベースで進捗を時間計算）
+- `leadStore`: リード送信データ
+
+データはサーバー再起動で消えます（in-memory のため）。
+
+### Job 進捗の仕組み
+
+ジョブ作成時に `startedAtMs`（現在時刻）を記録し、GET 時に経過時間から現在の進捗・ステップを計算します。
+
+| 経過時間 | ステップ | 進捗 |
+|---|---|---|
+| 0–2秒 | analyzing_plans | 0→25% |
+| 2–5秒 | detecting_walls_and_openings | 25→50% |
+| 5–8.5秒 | building_3d_model | 50→80% |
+| 8.5–10秒 | preparing_artifacts | 80→100% |
+
+fail デモ: ファイル名に `fail` を含む場合、5秒経過時点で `PROCESSING_FAILED` を返却。
+
+### Polling
+
+`useAmplifyJob` が 1.5 秒間隔で `GET /api/jobs/:jobId` をポーリングします。
+`completed` または `failed` を受信したらポーリングを停止します。
+
+### downloadArtifact の返却方式
+
+**案A（直接ファイルレスポンス）** を採用。Route Handler が `Response` で直接ファイルを返し、client は `res.blob()` で受け取ります。
+
+### Request Validation
+
+JSON body を持つエンドポイント（`/api/jobs`, `/api/leads`）は Zod で入力を検証し、不正入力には `VALIDATION_ERROR` を返します。ジョブ未存在時は `JOB_NOT_FOUND`（404）、未完了ジョブへのダウンロード要求には `DOWNLOAD_NOT_READY`（409）を返します。
+
 ## Mock の役割
 
 `src/lib/api/mock.ts` は API 契約に準拠したリファレンス実装です。
@@ -206,11 +271,13 @@ API が返す `currentStep` の値:
 - `setTimeout` で非同期遅延をシミュレーション
 - ファイル名に `fail` を含むと `PROCESSING_FAILED` を再現
 - Per-job 状態管理（グローバル状態漏れなし）
+- `NEXT_PUBLIC_API_MODE=mock` で有効化
 
-## Phase 7 以降での差し替え手順
+## Phase 8 以降での差し替え手順
 
-1. 実バックエンドの API を実装する（同じレスポンス shape に準拠）
-2. `src/lib/api/` に `real.ts` 等を作成し、`endpoints.ts` の URL に `fetch` する
-3. `client.ts` の `mockApi` を `realApi` に差し替える
-4. Zod validation が自動的にレスポンスを検証する
-5. `useAmplifyJob` の adapter 層が API → UI の変換を引き続き担当する
+1. FastAPI 等で同じ REST API を実装する（同じレスポンス shape に準拠）
+2. `NEXT_PUBLIC_API_URL` を外部サーバーの URL に設定する（例: `http://localhost:8000/api`）
+3. Route Handlers を削除するか、プロキシに変換する
+4. `real.ts` の `fetch` ロジックはそのまま使える
+5. Zod validation が自動的にレスポンスを検証する
+6. `useAmplifyJob` の adapter 層が API → UI の変換を引き続き担当する
