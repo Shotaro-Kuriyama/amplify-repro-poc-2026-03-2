@@ -90,6 +90,12 @@ AmpliFy フロントエンドモックの API 契約定義。
 
 **Response:** `Blob`
 
+> **Phase 7 決定事項メモ**: 現在の mock は `Blob` を直接返却しているが、実バックエンド接続時には以下の 2 択を検討すること。
+> 1. **Blob 直返し** — `fetch` で `response.blob()` を取得し、そのまま返す（現行と同じ interface）
+> 2. **downloadUrl 返却** — レスポンスを `{ downloadUrl: string; expiresAt: string }` にし、クライアント側で URL を開く
+>
+> 選択基準: ファイルサイズが大きい場合や署名付き URL（S3 presigned URL 等）を使う場合は downloadUrl 方式が適切。Phase 7 の最初にバックエンドのストレージ設計と合わせて決定する。
+
 ### 5. downloadQuantities
 
 数量表データを取得する。
