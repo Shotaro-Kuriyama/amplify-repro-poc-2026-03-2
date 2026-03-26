@@ -330,25 +330,51 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
    - `PipelineInput` → `ExtractedFloorData` → `PipelineOutput` の流れを型で表現
    - ただし `floorLabel` は現在フロントエンド専用で、サーバー側 API に未反映（Phase 8A で接続予定）
 
-### 次のステップ（Phase 8A に向けて）
+### Phase 8A 最小縦切りで完了したこと
 
-1. **最小の PDF テキスト抽出を試す**
-   - Python スクリプト（pdfplumber / PyMuPDF 等）で PDF からテキスト・線分情報を抽出
-   - `PipelineInput` → `ExtractedFloorData` の最小変換を実装
-   - まずは 1 枚の PDF で動くことを確認する
+1. **PipelineInput の組み立て** ✓
+   - `src/lib/server/pipeline.ts` に `buildPipelineInput()` を追加
+   - `StoredJob` + `StoredFile` から `PipelineInput` を構築
+   - `floorLabel` は暫定で `1F, 2F...` と自動採番（正式接続は後続で対応）
 
-2. **永続化の実体を入れる（必要に応じて）**
+2. **Python 最小 PDF 処理** ✓
+   - `scripts/pipeline/extract_pdf.py` を追加（PyMuPDF 使用）
+   - ページサイズ取得、テキストブロックからの部屋名候補抽出
+   - `PipelineOutput` の shape に沿った JSON を返却
+   - `walls` / `openings` は空配列（Phase 8A 後半で実装予定）
+
+3. **内部用 API エンドポイント** ✓
+   - `POST /api/internal/pipeline/run` を追加
+   - 既存 6 API 契約には影響しない独立したエンドポイント
+   - Node から Python を子プロセスとして呼び出す
+
+4. **動作確認ガイド** ✓
+   - `docs/phase8a-quickstart.md` に手順を記載
+
+### 次のステップ（Phase 8A 後半に向けて）
+
+1. **線分抽出と壁の推定**
+   - PyMuPDF の `page.get_drawings()` で線分情報を抽出
+   - 直線の長さ・角度・近接度から壁候補を推定
+   - `ExtractedWall` を実データで埋める
+
+2. **開口部の推定**
+   - 壁の途切れ・円弧パターンからドア・窓を推定
+   - `ExtractedOpening` を実データで埋める
+
+3. **floorLabel の正式接続**
+   - `createAmplifyJob` の request 拡張を検討
+   - フロントからサーバーへ階数情報を渡す
+
+4. **永続化の実体を入れる（必要に応じて）**
    - Phase 8A の処理が数十秒以上かかる場合、SQLite 導入を検討
-   - 短時間で済むなら in-memory のままでもよい
+   - 現時点では数十 ms で完了するため、in-memory のままで十分
 
-3. **Worker プロセスの最小実装**
-   - Python スクリプトを子プロセスとして起動する最小構成
-   - または FastAPI の最小エンドポイントとして切り出す
-
-### やらなくてよいこと（Phase 8A 初期）
+### やらなくてよいこと（Phase 8A 現時点）
 
 - 本格的な ML モデルの選定
 - GPU 前提の基盤整備
 - 大規模キューシステム導入
 - 本番運用前提の全自動化
-- 高精度な壁・開口部検出（まずは「動く」ことが最優先）
+- 高精度な壁・開口部検出（まずは「壁の推定ロジック」を小さく試す段階）
+- IFC 本生成（構造化 JSON が先）
