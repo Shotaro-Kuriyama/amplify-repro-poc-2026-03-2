@@ -177,14 +177,16 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
   1. **gap ベース**: 壁マージ後のギャップから推定
   2. **arc ベース**: drawing の cubic bezier (curve) からドア円弧を検出
 - **精度は暫定**。高精度なドア記号認識や窓枠検出は行っていない
+- **scale-aware**: すべてのしきい値は `settings.scale` から導出（実寸 mm ベース）
+- **1対1 マッチ保証**: arc-opening の対応は greedy distance matching で 1対1 を保証
 - gap ベースの条件:
   - 対象: 水平壁・垂直壁間のギャップのみ。斜め壁は対象外
-  - ギャップ幅: 8mm 〜 40mm (paper mm, 1:50 で 400mm〜2000mm 実寸)
-  - gap >= 14mm → `"door"` 寄り、それ未満 → `"unknown"`
+  - ギャップ幅: 実寸 400mm〜2000mm 相当（scale により paper mm に換算）
+  - gap >= 実寸 700mm 相当 → `"door"` 寄り、それ未満 → `"unknown"`
 - arc ベースの条件:
   - bounding box がほぼ正方形 (aspect 0.7〜1.4) の quarter-circle 候補を検出
-  - 半径 8mm〜30mm (paper mm) のアークをドア円弧とみなす
-  - arc 端点が壁線の 5mm 以内にある場合のみ採用
+  - 半径: 実寸 400mm〜1500mm 相当（scale により paper mm に換算）
+  - arc 端点が壁線の実寸 250mm 以内にある場合のみ採用
   - 既存の gap opening の近くに arc があれば → `"door"` + confidence 0.6
   - gap がなくても壁近くに arc があれば → 新規 door 候補 (confidence 0.5)
 - `height` は隣接壁の thickness 平均値を仮値として使用（実際の開口部高さではない）
@@ -194,6 +196,21 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
   - arc のみ → 0.5
   - gap のみ → 0.4
 - PDF によっては curve 情報がなく、ギャップもないため `openings` が 0 件のままの場合もある
+
+### scale-aware しきい値について
+
+- 各種しきい値は **実寸 mm** で定義し、`paper_mm = real_mm / scale` で換算している
+- `scale=50` のとき従来の固定値と完全一致する（後方互換）
+- `scale=100` のとき paper mm しきい値は `scale=50` の半分になる
+- `derive_thresholds(scale)` で全しきい値を一括生成
+- 座標系は変更なし（paper mm のまま）。判定しきい値のみ scale-aware
+
+### テストの実行
+
+```bash
+# fixture ベースの再現テスト
+python3 -m pytest scripts/pipeline/tests/ -v
+```
 
 ## 現時点の制約（まだダミー・未実装の部分）
 

@@ -87,95 +87,94 @@ except ImportError:
 
 PT_TO_MM = 0.3528
 
-# 壁候補判定の閾値
-MIN_WALL_LENGTH_MM = 50.0    # これ以下の線分は壁候補にしない
-MAX_ANGLE_DEV_DEG = 5.0      # 水平/垂直からの許容角度差（度）
-DEFAULT_CONFIDENCE = 0.5      # 暫定の固定 confidence
-
-# ── thickness 推定の閾値（暫定） ──
-#
-# 【推定方針 — Phase 8A 暫定】
-# thickness (壁厚) の推定ソースには優先順位がある:
-#   1. "rect" — 矩形の短辺。細長い矩形 (短辺 <= MAX_RECT_THICKNESS_MM) の場合のみ信頼する。
-#              大きな矩形の短辺は部屋寸法であり壁厚ではない。
-#   2. "line_stroke" — PDF の stroke width。描画上の線幅であり壁厚そのものではないが、
-#              太い線 = 太い壁 / 細い線 = 薄い壁 という傾向はあるため参考情報として使う。
-#   3. "nearby_rect" — 同一ページ内の rect 由来 thickness の代表値 (中央値) を借用。
-#   4. "fallback" — どの情報源もない場合のデフォルト値。
-#
-# これらは暫定ルール。高精度な壁厚推定は Phase 8B 以降で行う。
-#
-MAX_RECT_THICKNESS_MM = 20.0  # rect 短辺がこの値以下なら壁厚として信頼する (paper mm)
-                               # 超える場合は部屋/ゾーン形状とみなし壁厚として使わない
-                               # (1:50 で 20mm paper = 1000mm 実寸。壁としてありえない厚さ)
-FALLBACK_THICKNESS_MM = 5.0   # 全く手がかりがない場合のデフォルト壁厚 (paper mm)
-                               # (1:50 で 5mm paper = 250mm 実寸。一般的な RC 壁)
-
-# ── 重複除去・マージの閾値（暫定） ──
-# これらの値は暫定的なもの。PDF の解像度や図面縮尺によっては
-# 調整が必要になる可能性がある。高精度化は Phase 8B 以降で行う。
-DEDUP_TOLERANCE_MM = 2.0     # 始点・終点がこの距離以内なら「同一 wall」とみなす
-COLLINEAR_TOLERANCE_MM = 3.0  # 垂直方向の座標差がこの範囲内なら「同一直線上」とみなす
-MERGE_GAP_MM = 5.0           # 端点間のギャップがこの範囲内ならマージ対象
-
-# ── 開口部推定の閾値（Phase 8A 暫定） ──
-#
-# 【推定方針】
-# 壁マージ後に残るギャップ (> MERGE_GAP_MM) のうち、一定幅のものを開口部候補とみなす。
-# 同一直線上の壁が 2 本以上あり、その間に MIN_OPENING_WIDTH_MM 〜 MAX_OPENING_WIDTH_MM
-# のギャップがある場合に開口部候補を生成する。
-#
-# これは暫定ルール。円弧ドア判定や窓枠認識は Phase 8B 以降で行う。
-#
-MIN_OPENING_WIDTH_MM = 8.0    # これ未満のギャップは開口部にしない (paper mm)
-                               # (1:50 で 8mm = 400mm 実寸。小さすぎるギャップを除外)
-MAX_OPENING_WIDTH_MM = 40.0   # これ超のギャップは開口部にしない (paper mm)
-                               # (1:50 で 40mm = 2000mm 実寸。巨大すぎるギャップは壁の欠損)
-DOOR_THRESHOLD_MM = 14.0      # gap >= この値 → "door" 寄り (paper mm)
-                               # (1:50 で 14mm = 700mm 実寸。一般的なドア幅は 700-900mm)
-OPENING_COLLINEAR_TOLERANCE_MM = 1.5  # 開口部検出用の同一直線判定 (壁マージ後なので厳しめ)
-DEFAULT_OPENING_HEIGHT_MM = 5.0  # opening の height 仮値 (壁厚ベース)
-OPENING_CONFIDENCE = 0.4      # 開口部の暫定 confidence (壁より低い)
-
-# ── 円弧ベースのドア推定閾値（Phase 8A 暫定） ──
-#
-# 【推定方針】
-# PDF の drawing 情報にある cubic bezier curve ("c") のうち、
-# ドアの開き記号に見える quarter-circle パターンを拾い、
-# 既存の gap-based opening と突き合わせる。
-# arc が opening の近くにあれば "door" 判定の根拠を強化する。
-# arc のみで gap がなくても、壁線近くの arc は新規 door 候補として追加する。
-#
-# これは暫定ルール。完全なドア記号認識は Phase 8B 以降で行う。
-#
-MIN_ARC_RADIUS_MM = 8.0       # door arc 候補の最小半径 (paper mm)
-                                # (1:50 で 400mm 実寸。小さすぎるアークを除外)
-MAX_ARC_RADIUS_MM = 30.0      # door arc 候補の最大半径 (paper mm)
-                                # (1:50 で 1500mm 実寸。大きすぎるアークを除外)
-ARC_ASPECT_MIN = 0.7          # quarter-circle 判定の最小アスペクト比
-ARC_ASPECT_MAX = 1.4          # quarter-circle 判定の最大アスペクト比
-ARC_MATCH_DISTANCE_MM = 20.0  # arc と opening を結びつける最大距離 (mm)
-ARC_WALL_DISTANCE_MM = 5.0    # arc 端点が壁線上にあると判定する距離 (mm)
+# ── scale 非依存の定数 ──
+MAX_ANGLE_DEV_DEG = 5.0       # 水平/垂直からの許容角度差（度）
+DEFAULT_CONFIDENCE = 0.5      # 壁候補の暫定 confidence
+OPENING_CONFIDENCE = 0.4      # gap-only 開口部の暫定 confidence
 ARC_DOOR_CONFIDENCE = 0.6     # arc 根拠ありの door confidence
 ARC_ONLY_DOOR_CONFIDENCE = 0.5  # arc のみ (gap なし) の door confidence
+ARC_ASPECT_MIN = 0.7          # quarter-circle 判定の最小アスペクト比
+ARC_ASPECT_MAX = 1.4          # quarter-circle 判定の最大アスペクト比
+
+# ═══════════════════════════════════════════════════════════
+# scale-aware しきい値（Phase 8A 暫定）
+#
+# 【方針】
+# 各種しきい値は **実寸 mm** で定義し、scale に応じて paper mm に換算する。
+# paper_mm = real_mm / scale
+#
+# 基準値は現在の scale=50 での挙動から逆算:
+#   現在の paper mm × 50 = 実寸 mm
+#
+# 例: MIN_WALL_LENGTH_MM = 50 paper mm (scale=50) = 2500mm 実寸
+#     → scale=100 なら 2500/100 = 25 paper mm
+#
+# 【thickness 推定の優先順位（暫定）】
+#   1. "rect" — 矩形の短辺 (<= max_rect_thickness)
+#   2. "line_stroke" — PDF の stroke width (>= 1mm)
+#   3. "nearby_rect" — 同一ページ内の rect 由来代表値
+#   4. "fallback" — デフォルト壁厚
+#
+# これらは暫定ルール。高精度化は Phase 8B 以降で行う。
+# ═══════════════════════════════════════════════════════════
+
+# 実寸 mm ベースの基準値。derive_thresholds(scale) で paper mm に換算する。
+_REAL_MM_BASES: dict[str, float] = {
+    # ── 壁候補 ──
+    "min_wall_length": 2500.0,           # 壁として認識する最小長さ
+    "max_rect_thickness": 1000.0,        # rect 短辺をこれ以下なら壁厚として信頼
+    "fallback_thickness": 250.0,         # 壁厚の手がかりがない場合のデフォルト
+    # ── 重複除去 / マージ ──
+    "dedup_tolerance": 100.0,            # 同一 wall とみなす端点距離
+    "collinear_tolerance": 150.0,        # 同一直線上とみなす垂直距離
+    "merge_gap": 250.0,                  # マージ対象とする端点間ギャップ
+    # ── 開口部 ──
+    "min_opening_width": 400.0,          # opening 候補の最小幅
+    "max_opening_width": 2000.0,         # opening 候補の最大幅
+    "door_threshold": 700.0,             # これ以上の幅を "door" 寄り
+    "opening_collinear_tolerance": 75.0, # opening 検出用の同一直線判定
+    "default_opening_height": 250.0,     # opening height の仮値
+    # ── 円弧 / ドア ──
+    "min_arc_radius": 400.0,             # door arc 候補の最小半径
+    "max_arc_radius": 1500.0,            # door arc 候補の最大半径
+    "arc_match_distance": 1000.0,        # arc-opening を結びつける最大距離
+    "arc_wall_distance": 250.0,          # arc 端点が壁線上にあると判定する距離
+}
 
 
-def _extract_line_segments(page) -> list[dict]:
+def derive_thresholds(scale: int | float) -> dict[str, float]:
+    """
+    scale から paper mm のしきい値を導出する。
+
+    paper_mm = real_mm / scale
+    scale=50 のとき、Phase 8A の従来固定値とほぼ一致する。
+
+    >>> t = derive_thresholds(50)
+    >>> t["min_wall_length"]
+    50.0
+    >>> t["door_threshold"]
+    14.0
+    >>> t = derive_thresholds(100)
+    >>> t["min_wall_length"]
+    25.0
+    """
+    if scale <= 0:
+        scale = 50  # 安全策: 不正な scale は 50 にフォールバック
+    return {k: round(v / scale, 2) for k, v in _REAL_MM_BASES.items()}
+
+
+def _extract_line_segments(page, th: dict[str, float]) -> list[dict]:
     """
     page.get_drawings() から線分候補を抽出する。
 
-    返り値は以下の shape を持つ dict のリスト:
-      {
-        "x1": float, "y1": float,  # 始点 (mm)
-        "x2": float, "y2": float,  # 終点 (mm)
-        "thickness_mm": float,     # 推定壁厚 (mm)
-        "source_type": str,        # "line" or "rect"
-        "thickness_source": str,   # "rect" | "line_stroke" | "fallback"
-      }
+    th: derive_thresholds() の返り値。
     """
     page_rect = page.rect
     page_w_pt = page_rect.width
     page_h_pt = page_rect.height
+
+    fallback_t = th["fallback_thickness"]
+    max_rect_t = th["max_rect_thickness"]
 
     segments = []
     drawings = page.get_drawings()
@@ -185,17 +184,14 @@ def _extract_line_segments(page) -> list[dict]:
             item_type = item[0]
 
             if item_type == "l":
-                # 直線
                 p1, p2 = item[1], item[2]
                 stroke_w = d.get("width") or 0
                 stroke_mm = stroke_w * PT_TO_MM if stroke_w > 0 else 0
                 if stroke_mm >= 1.0:
-                    # stroke width がある程度太い → 描画上の太さとして参考にする
                     thickness_mm = stroke_mm
                     thickness_source = "line_stroke"
                 else:
-                    # stroke width が不明または極細 → 壁厚の手がかりなし
-                    thickness_mm = FALLBACK_THICKNESS_MM
+                    thickness_mm = fallback_t
                     thickness_source = "fallback"
                 segments.append({
                     "x1": p1.x * PT_TO_MM, "y1": p1.y * PT_TO_MM,
@@ -206,36 +202,30 @@ def _extract_line_segments(page) -> list[dict]:
                 })
 
             elif item_type == "re":
-                # 矩形 → 4辺に分解
                 r = item[1]
-                # ページ全体の背景矩形を除外（幅・高さがページの 95% 以上）
                 if (abs(r.width) > page_w_pt * 0.95
                         and abs(r.height) > page_h_pt * 0.95):
                     continue
 
-                # 短辺の長さ → 壁厚の候補
                 w_mm = abs(r.width) * PT_TO_MM
                 h_mm = abs(r.height) * PT_TO_MM
                 is_horizontal = w_mm >= h_mm
                 short_side_mm = h_mm if is_horizontal else w_mm
 
-                # 短辺が MAX_RECT_THICKNESS_MM 以下なら壁厚として信頼する
-                # 超える場合は大きな矩形（部屋/ゾーン形状）なので壁厚情報としては使わない
-                if short_side_mm <= MAX_RECT_THICKNESS_MM:
+                if short_side_mm <= max_rect_t:
                     thickness_mm = short_side_mm
                     thickness_source = "rect"
                 else:
-                    thickness_mm = FALLBACK_THICKNESS_MM
+                    thickness_mm = fallback_t
                     thickness_source = "fallback"
 
-                # 4辺を展開
                 x0, y0 = r.x0 * PT_TO_MM, r.y0 * PT_TO_MM
                 x1, y1 = r.x1 * PT_TO_MM, r.y1 * PT_TO_MM
                 rect_edges = [
-                    (x0, y0, x1, y0),  # 上辺
-                    (x1, y0, x1, y1),  # 右辺
-                    (x1, y1, x0, y1),  # 下辺
-                    (x0, y1, x0, y0),  # 左辺
+                    (x0, y0, x1, y0),
+                    (x1, y0, x1, y1),
+                    (x1, y1, x0, y1),
+                    (x0, y1, x0, y0),
                 ]
                 for ex1, ey1, ex2, ey2 in rect_edges:
                     segments.append({
@@ -268,20 +258,17 @@ def _segment_length(seg: dict) -> float:
     return math.sqrt(dx * dx + dy * dy)
 
 
-def _extract_raw_walls(page) -> list[dict]:
+def _extract_raw_walls(page, th: dict[str, float]) -> list[dict]:
     """
     drawing 情報から壁候補を抽出する（正規化・重複除去前の raw データ）。
-
-    返り値は ExtractedWall の shape + 内部補助情報 を持つ dict のリスト。
-    座標・thickness はすべて mm 単位。
-    内部補助情報 (_thickness_source) は最終出力前に除去する。
     """
-    segments = _extract_line_segments(page)
+    segments = _extract_line_segments(page, th)
     walls = []
+    min_len = th["min_wall_length"]
 
     for seg in segments:
         length = _segment_length(seg)
-        if length < MIN_WALL_LENGTH_MM:
+        if length < min_len:
             continue
         if not _is_near_axis_aligned(seg["x1"], seg["y1"], seg["x2"], seg["y2"]):
             continue
@@ -429,21 +416,19 @@ def _normalize_walls(walls: list[dict]) -> list[dict]:
     return result
 
 
-def _deduplicate_walls(walls: list[dict]) -> list[dict]:
+def _deduplicate_walls(walls: list[dict], th: dict[str, float]) -> list[dict]:
     """
     ほぼ同一の壁候補を除去する。
-
-    始点・終点がともに DEDUP_TOLERANCE_MM 以内の wall を同一とみなす。
-    重複時は信頼度の高い thickness を持つ方を残す。
     """
+    tol = th["dedup_tolerance"]
     result: list[dict] = []
     for wall in walls:
         dup_idx = None
         for i, existing in enumerate(result):
-            if (abs(wall["startX"] - existing["startX"]) <= DEDUP_TOLERANCE_MM
-                    and abs(wall["startY"] - existing["startY"]) <= DEDUP_TOLERANCE_MM
-                    and abs(wall["endX"] - existing["endX"]) <= DEDUP_TOLERANCE_MM
-                    and abs(wall["endY"] - existing["endY"]) <= DEDUP_TOLERANCE_MM):
+            if (abs(wall["startX"] - existing["startX"]) <= tol
+                    and abs(wall["startY"] - existing["startY"]) <= tol
+                    and abs(wall["endX"] - existing["endX"]) <= tol
+                    and abs(wall["endY"] - existing["endY"]) <= tol):
                 dup_idx = i
                 break
         if dup_idx is not None:
@@ -456,52 +441,45 @@ def _deduplicate_walls(walls: list[dict]) -> list[dict]:
     return result
 
 
-def _merge_collinear_walls(walls: list[dict]) -> list[dict]:
+def _merge_collinear_walls(walls: list[dict], th: dict[str, float]) -> list[dict]:
     """
     同一直線上で近接・接続する壁候補をマージする。
-
-    水平線同士/垂直線同士を対象に、
-    垂直方向の座標差が COLLINEAR_TOLERANCE_MM 以内で
-    端点間が MERGE_GAP_MM 以内（または重なり）なら 1 本にまとめる。
     """
     h_walls = [w for w in walls if _is_horizontal(w)]
     v_walls = [w for w in walls if not _is_horizontal(w)]
 
-    merged_h = _merge_axis_group(h_walls, axis="h")
-    merged_v = _merge_axis_group(v_walls, axis="v")
+    merged_h = _merge_axis_group(h_walls, axis="h", th=th)
+    merged_v = _merge_axis_group(v_walls, axis="v", th=th)
 
     return merged_h + merged_v
 
 
-def _merge_axis_group(walls: list[dict], axis: str) -> list[dict]:
+def _merge_axis_group(walls: list[dict], axis: str, th: dict[str, float]) -> list[dict]:
     """
     同一軸グループ内でマージする。
-
-    axis="h": 水平線。Y 座標が近いものを同一直線とみなし、X 方向でマージ
-    axis="v": 垂直線。X 座標が近いものを同一直線とみなし、Y 方向でマージ
     """
     if not walls:
         return []
 
+    col_tol = th["collinear_tolerance"]
+    gap_tol = th["merge_gap"]
+
     if axis == "h":
-        # Y で並べ、同じ Y グループ内を startX 順に
         walls_sorted = sorted(walls, key=lambda w: (w["startY"], w["startX"]))
     else:
-        # X で並べ、同じ X グループ内を startY 順に
         walls_sorted = sorted(walls, key=lambda w: (w["startX"], w["startY"]))
 
-    merged = [dict(walls_sorted[0])]  # コピーして使う
+    merged = [dict(walls_sorted[0])]
 
     for wall in walls_sorted[1:]:
         prev = merged[-1]
 
         if axis == "h":
-            same_line = abs(wall["startY"] - prev["startY"]) <= COLLINEAR_TOLERANCE_MM
-            # wall は startX 順なので、prev の endX + GAP >= wall の startX なら接続
-            adjacent = same_line and wall["startX"] <= prev["endX"] + MERGE_GAP_MM
+            same_line = abs(wall["startY"] - prev["startY"]) <= col_tol
+            adjacent = same_line and wall["startX"] <= prev["endX"] + gap_tol
         else:
-            same_line = abs(wall["startX"] - prev["startX"]) <= COLLINEAR_TOLERANCE_MM
-            adjacent = same_line and wall["startY"] <= prev["endY"] + MERGE_GAP_MM
+            same_line = abs(wall["startX"] - prev["startX"]) <= col_tol
+            adjacent = same_line and wall["startY"] <= prev["endY"] + gap_tol
 
         if adjacent:
             # マージ: 長い方に延長する
@@ -526,23 +504,14 @@ def _merge_axis_group(walls: list[dict], axis: str) -> list[dict]:
     return merged
 
 
-def extract_walls(page) -> list[dict]:
+def extract_walls(page, th: dict[str, float]) -> list[dict]:
     """
     drawing 情報から壁候補を抽出し、整理して返す。
 
-    処理パイプライン:
-      1. drawing から raw な壁候補を抽出
-      2. 方向を正規化
-      3. fallback thickness を rect 由来の代表値で補完
-      4. ほぼ同一の重複を除去
-      5. 同一直線上の近接壁をマージ
-      6. 内部補助情報を除去し、id を振り直す
-
-    返り値は ExtractedWall の shape に合致する dict のリスト。
-    座標・thickness はすべて mm 単位。
+    th: derive_thresholds() の返り値。
     """
     # Step 1: raw 抽出
-    raw = _extract_raw_walls(page)
+    raw = _extract_raw_walls(page, th)
 
     # Step 2: 正規化
     normalized = _normalize_walls(raw)
@@ -551,10 +520,10 @@ def extract_walls(page) -> list[dict]:
     refined = _refine_thickness(normalized)
 
     # Step 4: 重複除去
-    deduped = _deduplicate_walls(refined)
+    deduped = _deduplicate_walls(refined, th)
 
     # Step 5: 同一直線上マージ
-    merged = _merge_collinear_walls(deduped)
+    merged = _merge_collinear_walls(deduped, th)
 
     # Step 6: 内部補助情報を除去し、id を振り直す
     for i, wall in enumerate(merged):
@@ -602,16 +571,11 @@ def extract_walls(page) -> list[dict]:
 # ═══════════════════════════════════════════════════════════
 
 
-def extract_openings(walls: list[dict]) -> list[dict]:
+def extract_openings(walls: list[dict], th: dict[str, float]) -> list[dict]:
     """
     壁候補間のギャップから開口部候補を推定する。
 
-    壁マージ後の壁リストを入力として、同一直線上の壁間に
-    MIN_OPENING_WIDTH_MM 〜 MAX_OPENING_WIDTH_MM のギャップがあれば
-    開口部候補として返す。
-
-    返り値は ExtractedOpening の shape に合致する dict のリスト。
-    座標はすべて mm 単位。
+    th: derive_thresholds() の返り値。
     """
     if not walls:
         return []
@@ -620,14 +584,9 @@ def extract_openings(walls: list[dict]) -> list[dict]:
     v_walls = [w for w in walls if not _is_horizontal(w)]
 
     openings: list[dict] = []
+    openings += _find_gaps_on_axis(h_walls, axis="h", th=th)
+    openings += _find_gaps_on_axis(v_walls, axis="v", th=th)
 
-    # 水平壁のギャップから開口部を検出
-    openings += _find_gaps_on_axis(h_walls, axis="h")
-
-    # 垂直壁のギャップから開口部を検出
-    openings += _find_gaps_on_axis(v_walls, axis="v")
-
-    # デバッグログ (gap-based のみ。arc 強化は後段で行う)
     print(
         f"[opening-detect] gap_based={len(openings)}",
         file=sys.stderr,
@@ -636,17 +595,19 @@ def extract_openings(walls: list[dict]) -> list[dict]:
     return openings
 
 
-def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
+def _find_gaps_on_axis(walls: list[dict], axis: str, th: dict[str, float]) -> list[dict]:
     """
     同一軸の壁グループ内でギャップを検出し、開口部候補を返す。
-
-    axis="h": 水平壁。Y 座標が近いものをグループ化し、X 方向のギャップを検出
-    axis="v": 垂直壁。X 座標が近いものをグループ化し、Y 方向のギャップを検出
     """
     if not walls:
         return []
 
-    # 同一直線グループに分ける
+    col_tol = th["opening_collinear_tolerance"]
+    min_w = th["min_opening_width"]
+    max_w = th["max_opening_width"]
+    door_t = th["door_threshold"]
+    default_h = th["default_opening_height"]
+
     if axis == "h":
         walls_sorted = sorted(walls, key=lambda w: (w["startY"], w["startX"]))
     else:
@@ -658,9 +619,9 @@ def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
     for wall in walls_sorted[1:]:
         prev = current_group[0]
         if axis == "h":
-            same_line = abs(wall["startY"] - prev["startY"]) <= OPENING_COLLINEAR_TOLERANCE_MM
+            same_line = abs(wall["startY"] - prev["startY"]) <= col_tol
         else:
-            same_line = abs(wall["startX"] - prev["startX"]) <= OPENING_COLLINEAR_TOLERANCE_MM
+            same_line = abs(wall["startX"] - prev["startX"]) <= col_tol
 
         if same_line:
             current_group.append(wall)
@@ -669,13 +630,11 @@ def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
             current_group = [wall]
     groups.append(current_group)
 
-    # 各グループ内で隣接壁間のギャップを開口部候補にする
     openings: list[dict] = []
     for group in groups:
         if len(group) < 2:
             continue
 
-        # 主軸方向でソート
         if axis == "h":
             group_sorted = sorted(group, key=lambda w: w["startX"])
         else:
@@ -696,17 +655,13 @@ def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
 
             gap_width = gap_end - gap_start
 
-            # ギャップ幅が開口部として妥当な範囲か
-            if gap_width < MIN_OPENING_WIDTH_MM or gap_width > MAX_OPENING_WIDTH_MM:
+            if gap_width < min_w or gap_width > max_w:
                 continue
 
-            # 開口部候補を生成
             gap_center = (gap_start + gap_end) / 2
-            # height は隣接壁の thickness の平均を仮値として使用
             avg_thickness = (wall_a["thickness"] + wall_b["thickness"]) / 2
 
-            # type の分類（暫定）
-            if gap_width >= DOOR_THRESHOLD_MM:
+            if gap_width >= door_t:
                 opening_type = "door"
             else:
                 opening_type = "unknown"
@@ -718,16 +673,15 @@ def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
                 center_x = round(perp_coord, 1)
                 center_y = round(gap_center, 1)
 
-            # wallId: 隣接する 2 壁のうち前方の壁を紐づける
             wall_id = wall_a.get("id")
 
             openings.append({
-                "id": "",  # 後で振り直す
+                "id": "",
                 "type": opening_type,
                 "centerX": center_x,
                 "centerY": center_y,
                 "width": round(gap_width, 1),
-                "height": round(avg_thickness, 1),
+                "height": round(avg_thickness, 1) if avg_thickness > 0 else default_h,
                 "wallId": wall_id,
                 "confidence": OPENING_CONFIDENCE,
             })
@@ -757,17 +711,15 @@ def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
 # ═══════════════════════════════════════════════════════════
 
 
-def _extract_door_arcs(page) -> list[dict]:
+def _extract_door_arcs(page, th: dict[str, float]) -> list[dict]:
     """
     drawing 情報からドア開き円弧の候補を抽出する。
 
-    cubic bezier ("c") のうち、quarter-circle に近いものを
-    door arc 候補として返す。
-
-    返り値:
-      [{"start": (x, y), "end": (x, y), "center": (x, y), "radius": float}, ...]
-      座標はすべて mm 単位。
+    th: derive_thresholds() の返り値。
     """
+    min_r = th["min_arc_radius"]
+    max_r = th["max_arc_radius"]
+
     drawings = page.get_drawings()
     arcs: list[dict] = []
 
@@ -776,38 +728,31 @@ def _extract_door_arcs(page) -> list[dict]:
             if item[0] != "c":
                 continue
 
-            # cubic bezier: item = ("c", p1, p2, p3, p4)
-            # p1=start, p2=ctrl1, p3=ctrl2, p4=end
             p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
 
-            # mm に変換
             x1, y1 = p1.x * PT_TO_MM, p1.y * PT_TO_MM
             cx1, cy1 = p2.x * PT_TO_MM, p2.y * PT_TO_MM
             cx2, cy2 = p3.x * PT_TO_MM, p3.y * PT_TO_MM
             x4, y4 = p4.x * PT_TO_MM, p4.y * PT_TO_MM
 
-            # bounding box of all 4 control points
             all_x = [x1, cx1, cx2, x4]
             all_y = [y1, cy1, cy2, y4]
             bbox_w = max(all_x) - min(all_x)
             bbox_h = max(all_y) - min(all_y)
 
             if bbox_w < 1 or bbox_h < 1:
-                continue  # 極小の曲線は無視
+                continue
 
-            # quarter-circle 判定: bounding box がほぼ正方形
             aspect = bbox_w / bbox_h
             if aspect < ARC_ASPECT_MIN or aspect > ARC_ASPECT_MAX:
                 continue
 
-            # 推定半径: chord / sqrt(2) (quarter circle の chord と半径の関係)
             chord = math.sqrt((x4 - x1) ** 2 + (y4 - y1) ** 2)
             radius = chord / math.sqrt(2)
 
-            if radius < MIN_ARC_RADIUS_MM or radius > MAX_ARC_RADIUS_MM:
+            if radius < min_r or radius > max_r:
                 continue
 
-            # bounding box の中心
             center_x = (min(all_x) + max(all_x)) / 2
             center_y = (min(all_y) + max(all_y)) / 2
 
@@ -825,75 +770,74 @@ def _enhance_openings_with_arcs(
     openings: list[dict],
     arcs: list[dict],
     walls: list[dict],
+    th: dict[str, float],
 ) -> list[dict]:
     """
-    arc 候補を使って opening 候補を強化する。
+    arc 候補を使って opening 候補を強化する（1対1 マッチ保証）。
 
-    1. 既存 opening の近くに arc がある → type="door", confidence を引き上げ
-    2. arc があるが nearby opening がない → 壁の近くなら新規 door 候補を追加
+    アルゴリズム（greedy matching by distance）:
+    1. 全 (opening, arc) ペアの距離を計算
+    2. 距離昇順でソート
+    3. まだ未使用の opening/arc 同士だけ採用 → 1対1 を保証
+    4. マッチしなかった arc は壁近くなら新規 door 候補に
 
-    返り値は更新済みの openings リスト。
+    th: derive_thresholds() の返り値。
     """
     if not arcs:
         return openings
 
-    # arc ごとにマッチ済みかどうかを追跡
-    arc_matched = [False] * len(arcs)
+    match_dist = th["arc_match_distance"]
 
-    # Step 1: 既存 opening と arc を突き合わせる
-    for opening in openings:
+    # Step 1: 全候補ペアの距離を集める
+    pairs: list[tuple[float, int, int]] = []  # (distance, opening_idx, arc_idx)
+    for oi, opening in enumerate(openings):
         ox, oy = opening["centerX"], opening["centerY"]
-        best_arc_idx = -1
-        best_dist = float("inf")
-
         for ai, arc in enumerate(arcs):
-            # arc の start/end 両方の距離を見て、近い方を使う
-            for pt in [arc["start"], arc["end"]]:
-                dist = math.sqrt((ox - pt[0]) ** 2 + (oy - pt[1]) ** 2)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_arc_idx = ai
+            # arc の start/end/center 全てとの距離を計算し、最小を使う
+            min_dist = float("inf")
+            for pt in [arc["start"], arc["end"], arc["center"]]:
+                d = math.sqrt((ox - pt[0]) ** 2 + (oy - pt[1]) ** 2)
+                if d < min_dist:
+                    min_dist = d
+            if min_dist <= match_dist:
+                pairs.append((min_dist, oi, ai))
 
-            # arc center との距離も見る
-            cx, cy = arc["center"]
-            dist_c = math.sqrt((ox - cx) ** 2 + (oy - cy) ** 2)
-            if dist_c < best_dist:
-                best_dist = dist_c
-                best_arc_idx = ai
+    # Step 2: 距離昇順でソートし、greedy で 1対1 マッチ
+    pairs.sort(key=lambda x: x[0])
+    opening_matched: set[int] = set()
+    arc_matched: set[int] = set()
 
-        if best_dist <= ARC_MATCH_DISTANCE_MM and best_arc_idx >= 0:
-            # arc と結びつく → door に寄せて confidence を上げる
-            opening["type"] = "door"
-            opening["confidence"] = ARC_DOOR_CONFIDENCE
-            opening["_arc_matched"] = True  # 内部フラグ
-            arc_matched[best_arc_idx] = True
+    for dist, oi, ai in pairs:
+        if oi in opening_matched or ai in arc_matched:
+            continue
+        # マッチ成立
+        openings[oi]["type"] = "door"
+        openings[oi]["confidence"] = ARC_DOOR_CONFIDENCE
+        openings[oi]["_arc_matched"] = True
+        opening_matched.add(oi)
+        arc_matched.add(ai)
 
-    # Step 2: マッチしなかった arc から新規 door 候補を生成
+    # Step 3: マッチしなかった arc から新規 door 候補を生成
     for ai, arc in enumerate(arcs):
-        if arc_matched[ai]:
+        if ai in arc_matched:
             continue
 
-        # arc の端点が壁線の近くにあるかチェック
-        wall_id = _find_nearest_wall_for_arc(arc, walls)
+        wall_id = _find_nearest_wall_for_arc(arc, walls, th)
         if wall_id is None:
-            continue  # 壁の近くにない arc は無視
+            continue
 
-        # 新規 door 候補を生成
-        # ドアの中心: arc の start と end の中間点
         sx, sy = arc["start"]
         ex, ey = arc["end"]
         center_x = round((sx + ex) / 2, 1)
         center_y = round((sy + ey) / 2, 1)
 
-        # ドア幅: arc の radius（ドアの開き幅 ≈ ドアリーフ幅）
         door_width = round(arc["radius"], 1)
 
-        # 近傍壁の thickness を height 仮値に
         wall = next((w for w in walls if w.get("id") == wall_id), None)
-        height = round(wall["thickness"], 1) if wall else DEFAULT_OPENING_HEIGHT_MM
+        height = round(wall["thickness"], 1) if wall else th["default_opening_height"]
 
         openings.append({
-            "id": "",  # 後で振り直す
+            "id": "",
             "type": "door",
             "centerX": center_x,
             "centerY": center_y,
@@ -904,14 +848,29 @@ def _enhance_openings_with_arcs(
             "_arc_matched": True,
         })
 
+    # デバッグ: マッチ内訳
+    arc_gap_count = len(opening_matched)
+    arc_only_count = sum(1 for ai in range(len(arcs)) if ai not in arc_matched
+                         and _find_nearest_wall_for_arc(arcs[ai], walls, th) is not None)
+    gap_only_count = sum(1 for oi in range(len(openings))
+                         if not openings[oi].get("_arc_matched"))
+    print(
+        f"[arc-match] pairs_checked={len(pairs)}, "
+        f"arc+gap={arc_gap_count}, arc_only={arc_only_count}, "
+        f"gap_only={gap_only_count}",
+        file=sys.stderr,
+    )
+
     return openings
 
 
-def _find_nearest_wall_for_arc(arc: dict, walls: list[dict]) -> str | None:
+def _find_nearest_wall_for_arc(
+    arc: dict, walls: list[dict], th: dict[str, float],
+) -> str | None:
     """
     arc の端点が壁線の近くにあるかチェックし、最も近い壁の id を返す。
-    壁線上にない場合は None を返す。
     """
+    wall_dist = th["arc_wall_distance"]
     best_wall_id = None
     best_dist = float("inf")
 
@@ -919,7 +878,6 @@ def _find_nearest_wall_for_arc(arc: dict, walls: list[dict]) -> str | None:
         wx1, wy1 = wall["startX"], wall["startY"]
         wx2, wy2 = wall["endX"], wall["endY"]
 
-        # arc の start/end それぞれと壁線の距離をチェック
         for pt in [arc["start"], arc["end"]]:
             px, py = pt
             dist = _point_to_segment_distance(px, py, wx1, wy1, wx2, wy2)
@@ -927,7 +885,7 @@ def _find_nearest_wall_for_arc(arc: dict, walls: list[dict]) -> str | None:
                 best_dist = dist
                 best_wall_id = wall.get("id")
 
-    if best_dist <= ARC_WALL_DISTANCE_MM:
+    if best_dist <= wall_dist:
         return best_wall_id
     return None
 
@@ -954,23 +912,34 @@ def _point_to_segment_distance(
     return math.sqrt((px - nearest_x) ** 2 + (py - nearest_y) ** 2)
 
 
-def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0) -> dict:
-    """1ページ分の最小抽出データを返す。"""
+def extract_floor_data(
+    file_entry: dict,
+    doc: fitz.Document,
+    page_index: int = 0,
+    settings: dict | None = None,
+) -> dict:
+    """
+    1ページ分の最小抽出データを返す。
+
+    settings: PipelineInput.settings (scale, floorHeight)。
+              None の場合は scale=50 をデフォルトとして使う。
+    """
+    scale = (settings or {}).get("scale", 50)
+    th = derive_thresholds(scale)
+
     page = doc[page_index]
-    # ページサイズ: PDF の単位はポイント (1pt = 1/72 inch = 0.3528mm)
     rect = page.rect
     page_width_mm = round(rect.width * PT_TO_MM, 1)
     page_height_mm = round(rect.height * PT_TO_MM, 1)
 
     # --- 壁候補の抽出 ---
-    walls = extract_walls(page)
+    walls = extract_walls(page, th)
 
-    # --- 開口部候補の推定（壁候補のギャップベース + 円弧ベース） ---
-    openings = extract_openings(walls)
+    # --- 開口部候補の推定（gap ベース + arc ベース） ---
+    openings = extract_openings(walls, th)
 
-    # --- 円弧ベースのドア推定強化 ---
-    door_arcs = _extract_door_arcs(page)
-    openings = _enhance_openings_with_arcs(openings, door_arcs, walls)
+    door_arcs = _extract_door_arcs(page, th)
+    openings = _enhance_openings_with_arcs(openings, door_arcs, walls, th)
 
     # id を振り直し、内部フラグを除去
     arc_confirmed = sum(1 for op in openings if op.get("_arc_matched"))
@@ -984,8 +953,8 @@ def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0
         t = op["type"]
         type_counts[t] = type_counts.get(t, 0) + 1
     print(
-        f"[opening-arc] arcs={len(door_arcs)}, arc_confirmed_doors={arc_confirmed}, "
-        f"total_openings={len(openings)}, types={type_counts}",
+        f"[opening-arc] arcs={len(door_arcs)}, arc_confirmed={arc_confirmed}, "
+        f"total_openings={len(openings)}, types={type_counts}, scale={scale}",
         file=sys.stderr,
     )
 
@@ -1036,6 +1005,7 @@ def process_pipeline(pipeline_input: dict) -> dict:
 
     job_id = pipeline_input["jobId"]
     files = pipeline_input["files"]
+    settings = pipeline_input.get("settings", {})
     floors = []
     total_walls = 0
     total_openings = 0
@@ -1086,7 +1056,7 @@ def process_pipeline(pipeline_input: dict) -> dict:
 
         # 最小実装: 各ファイルの最初のページのみ処理
         if doc.page_count > 0:
-            floor_data = extract_floor_data(file_entry, doc, page_index=0)
+            floor_data = extract_floor_data(file_entry, doc, page_index=0, settings=settings)
             floors.append(floor_data)
             total_walls += len(floor_data["walls"])
             total_openings += len(floor_data["openings"])

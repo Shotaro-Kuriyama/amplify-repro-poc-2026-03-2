@@ -428,20 +428,26 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
 
 1. **cubic bezier からのドア円弧検出** ✓
    - `get_drawings()` の "c" (cubic bezier) アイテムから quarter-circle パターンを検出
-   - bounding box のアスペクト比 (0.7〜1.4) と半径 (8〜30mm paper) でフィルタ
+   - bounding box のアスペクト比 (0.7〜1.4) と半径でフィルタ
    - line_only PDF で 8 本の door arc を検出
 
-2. **既存 opening との突き合わせ** ✓
-   - arc 端点が opening 近傍 (20mm 以内) にあれば → type="door", confidence 0.6 に引き上げ
-   - arc のみで gap がなくても壁線近く (5mm 以内) なら → 新規 door 候補 (confidence 0.5)
+2. **既存 opening との 1対1 マッチ** ✓
+   - greedy distance matching で arc-opening の 1対1 対応を保証
+   - arc 端点が opening 近傍にあれば → type="door", confidence 0.6 に引き上げ
+   - arc のみで gap がなくても壁線近くなら → 新規 door 候補 (confidence 0.5)
    - 効果: line_only PDF で 1 opening → 9 openings (1 gap + 8 arc-based)
 
-3. **confidence の差別化** ✓
-   - arc + gap 両根拠 → 0.6
-   - arc のみ → 0.5
-   - gap のみ → 0.4
+3. **scale-aware しきい値** ✓
+   - 全しきい値を実寸 mm ベースで定義し、`derive_thresholds(scale)` で paper mm に換算
+   - `scale=50` で従来の固定値と完全一致（後方互換）
+   - `scale=100` では paper mm しきい値が半分になる
 
-4. **まだ高精度なドア記号認識ではない**
+4. **fixture ベースの再現テスト** ✓
+   - `scripts/pipeline/tests/test_extract_pdf.py` (21 テスト)
+   - scale=50 後方互換、scale 追従、1対1 マッチ保証、arc-only door 確認
+   - `python3 -m pytest scripts/pipeline/tests/ -v` で実行
+
+5. **まだ高精度なドア記号認識ではない**
    - quarter-circle の簡易判定のみ。複雑なドア記号は未対応
    - 窓枠認識は未実装
    - IFC 生成にはまだ進んでいない
