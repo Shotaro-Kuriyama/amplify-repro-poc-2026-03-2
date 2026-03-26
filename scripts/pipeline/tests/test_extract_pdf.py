@@ -6,6 +6,7 @@ Phase 8A: extract_pdf.py の fixture ベース再現テスト
 - B: scale 変更時の threshold 追従確認
 - C: arc-opening の 1対1 マッチ保証（合成データ）
 - D: arc-only door 候補の生成確認（合成データ）
+- E: window 認識の確認（fixture + 合成データ）
 
 fixture:
 - line_only_doors_scale_1_50.pdf
@@ -13,6 +14,8 @@ fixture:
     gap+arc マッチ 1 件 (conf 0.6) + arc-only door 2 件 (conf 0.5)。
 - walls_only_scale_1_50.pdf
     rect ベースの壁のみ。opening 0 件、arc 0 件。
+- windows_only_scale_1_50.pdf
+    line ベースの壁 + 窓マーカー rect 2 件。window 2 件検出。
 
 実行方法:
   cd amplify-mock
@@ -35,6 +38,7 @@ from extract_pdf import (
     derive_thresholds,
     extract_openings,
     extract_walls,
+    extract_windows,
     _extract_door_arcs,
     _enhance_openings_with_arcs,
     _find_nearest_wall_for_arc,
@@ -47,6 +51,7 @@ from extract_pdf import (
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 LINE_ONLY_PDF = FIXTURES_DIR / "line_only_doors_scale_1_50.pdf"
 WALLS_ONLY_PDF = FIXTURES_DIR / "walls_only_scale_1_50.pdf"
+WINDOWS_ONLY_PDF = FIXTURES_DIR / "windows_only_scale_1_50.pdf"
 
 
 def _have_fitz():
@@ -66,6 +71,9 @@ needs_line_only = pytest.mark.skipif(
 )
 needs_walls_only = pytest.mark.skipif(
     not WALLS_ONLY_PDF.exists(), reason="walls_only fixture PDF not found"
+)
+needs_windows_only = pytest.mark.skipif(
+    not WINDOWS_ONLY_PDF.exists(), reason="windows_only fixture PDF not found"
 )
 
 
@@ -424,3 +432,146 @@ class TestUtilities:
         """点が線分の端を超えているとき。"""
         d = _point_to_segment_distance(210, 100, 0, 100, 200, 100)
         assert abs(d - 10.0) < 0.01
+
+
+# ═══════════════════════════════════════════════════════════
+# テスト E: window 認識
+# ═══════════════════════════════════════════════════════════
+
+class TestWindowDetection:
+    """rect パターンからの window 認識を確認する。"""
+
+    @needs_fitz
+    @needs_windows_only
+    def test_windows_detected(self):
+        """windows_only fixture で window が 2 件検出されること。"""
+        import fitz
+        doc = fitz.open(str(WINDOWS_ONLY_PDF))
+        th = derive_thresholds(50)
+        page = doc[0]
+        walls = extract_walls(page, th)
+        door_openings = extract_openings(walls, th)
+        arcs = _extract_door_arcs(page, th)
+        door_openings = _enhance_openings_with_arcs(door_openings, arcs, walls, th)
+        windows = extract_windows(page, walls, door_openings, th)
+        doc.close()
+        assert len(windows) == 2, f"expected 2 windows, got {len(windows)}"
+        for w in windows:
+            assert w["type"] == "window"
+
+    @needs_fitz
+    @needs_windows_only
+    def test_windows_no_doors(self):
+        """windows_only fixture で door が 0 件であること。"""
+        import fitz
+        doc = fitz.open(str(WINDOWS_ONLY_PDF))
+        th = derive_thresholds(50)
+        page = doc[0]
+        walls = extract_walls(page, th)
+        openings = extract_openings(walls, th)
+        arcs = _extract_door_arcs(page, th)
+        openings = _enhance_openings_with_arcs(openings, arcs, walls, th)
+        doc.close()
+        doors = [o for o in openings if o["type"] == "door"]
+        assert len(doors) == 0, f"expected 0 doors, got {len(doors)}"
+
+    @needs_fitz
+    @needs_walls_only
+    def test_walls_only_no_windows(self):
+        """walls_only fixture で window が 0 件であること。"""
+        import fitz
+        doc = fitz.open(str(WALLS_ONLY_PDF))
+        th = derive_thresholds(50)
+        page = doc[0]
+        walls = extract_walls(page, th)
+        door_openings = extract_openings(walls, th)
+        arcs = _extract_door_arcs(page, th)
+        door_openings = _enhance_openings_with_arcs(door_openings, arcs, walls, th)
+        windows = extract_windows(page, walls, door_openings, th)
+        doc.close()
+        assert len(windows) == 0
+
+    @needs_fitz
+    @needs_line_only
+    def test_line_only_no_windows(self):
+        """line_only (door) fixture で window が 0 件であること。"""
+        import fitz
+        doc = fitz.open(str(LINE_ONLY_PDF))
+        th = derive_thresholds(50)
+        page = doc[0]
+        walls = extract_walls(page, th)
+        door_openings = extract_openings(walls, th)
+        arcs = _extract_door_arcs(page, th)
+        door_openings = _enhance_openings_with_arcs(door_openings, arcs, walls, th)
+        windows = extract_windows(page, walls, door_openings, th)
+        doc.close()
+        assert len(windows) == 0, "door fixture should have no windows"
+
+    @needs_fitz
+    @needs_line_only
+    def test_door_fixture_unchanged(self):
+        """window 追加後も door fixture の openings 内訳が変わっていないこと。"""
+        import fitz
+        doc = fitz.open(str(LINE_ONLY_PDF))
+        th = derive_thresholds(50)
+        page = doc[0]
+        walls = extract_walls(page, th)
+        gap_openings = extract_openings(walls, th)
+        arcs = _extract_door_arcs(page, th)
+        all_openings = _enhance_openings_with_arcs(list(gap_openings), arcs, walls, th)
+        doc.close()
+        assert len(gap_openings) == 1, "gap openings should still be 1"
+        assert len(arcs) == 3, "arcs should still be 3"
+        assert len(all_openings) == 3, "total door openings should still be 3"
+
+    def test_window_does_not_overlap_door(self):
+        """door と同じ位置に window が追加されないこと（合成データ）。"""
+        th = derive_thresholds(50)
+        walls = [
+            {"id": "w0", "startX": 0, "startY": 100, "endX": 200, "endY": 100,
+             "thickness": 5, "confidence": 0.5},
+        ]
+        # door opening at x=50
+        existing_openings = [
+            {"id": "o0", "type": "door", "centerX": 50, "centerY": 100,
+             "width": 15, "height": 5, "wallId": "w0", "confidence": 0.6},
+        ]
+        # 合成 window 候補を直接テスト (extract_windows は page を要するが、
+        # _dedup_window_candidates のロジックをテスト)
+        from extract_pdf import _dedup_window_candidates
+        candidates = [
+            {"centerX": 50, "centerY": 100, "width": 12, "height": 2,
+             "wallId": "w0", "_wall_dist": 0.5},
+            {"centerX": 150, "centerY": 100, "width": 12, "height": 2,
+             "wallId": "w0", "_wall_dist": 0.5},
+        ]
+        merged = _dedup_window_candidates(candidates, th["window_dedup_distance"])
+
+        # 重複除去後: 既存 door と近い候補をフィルタ
+        dedup_dist = th["window_dedup_distance"]
+        windows = []
+        for cand in merged:
+            too_close = False
+            for op in existing_openings:
+                d = math.sqrt(
+                    (cand["centerX"] - op["centerX"]) ** 2
+                    + (cand["centerY"] - op["centerY"]) ** 2
+                )
+                if d <= dedup_dist:
+                    too_close = True
+                    break
+            if not too_close:
+                windows.append(cand)
+
+        # x=50 の候補は door と重複して除外、x=150 は残る
+        assert len(windows) == 1, f"expected 1 window after dedup, got {len(windows)}"
+        assert windows[0]["centerX"] == 150
+
+    def test_window_thresholds_scale_aware(self):
+        """window 用しきい値が scale に応じて変化すること。"""
+        th50 = derive_thresholds(50)
+        th100 = derive_thresholds(100)
+        # scale=100 では paper mm が半分
+        assert abs(th100["min_window_width"] - th50["min_window_width"] / 2) < 0.01
+        assert abs(th100["max_window_width"] - th50["max_window_width"] / 2) < 0.01
+        assert abs(th100["window_wall_distance"] - th50["window_wall_distance"] / 2) < 0.01

@@ -173,9 +173,10 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 
 ### openings に関する補足
 
-- **2 つの検出ソース** を組み合わせて開口部候補を推定している（どちらも暫定ルールベース）:
-  1. **gap ベース**: 壁マージ後のギャップから推定
-  2. **arc ベース**: drawing の cubic bezier (curve) からドア円弧を検出
+- **3 つの検出ソース** を組み合わせて開口部候補を推定している（すべて暫定ルールベース）:
+  1. **gap ベース**: 壁マージ後のギャップから推定（door / unknown）
+  2. **arc ベース**: drawing の cubic bezier (curve) からドア円弧を検出（door）
+  3. **rect ベース**: 壁近傍の細長い rect パターンから窓候補を検出（window）
 - **精度は暫定**。高精度なドア記号認識や窓枠検出は行っていない
 - **scale-aware**: すべてのしきい値は `settings.scale` から導出（実寸 mm ベース）
 - **1対1 マッチ保証**: arc-opening の対応は greedy distance matching で 1対1 を保証
@@ -191,10 +192,19 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
   - gap がなくても壁近くに arc があれば → 新規 door 候補 (confidence 0.5)
 - `height` は隣接壁の thickness 平均値を仮値として使用（実際の開口部高さではない）
 - `wallId` は隣接壁の id を紐づけている
+- rect ベース（window）の条件:
+  - 壁近傍（実寸 150mm 以内）にある細長い rect を窓マーカーとみなす
+  - rect 長辺（窓幅）: 実寸 500mm〜1800mm 相当
+  - rect 短辺（マーカー厚）: 実寸 200mm 以下
+  - rect の長辺方向が壁と平行であること
+  - 壁として既にカウントされている大きな rect は除外
+  - 既存 door opening と近すぎる位置の候補は重複除去
 - `confidence` の差別化:
   - arc + gap の両根拠 → 0.6
   - arc のみ → 0.5
   - gap のみ → 0.4
+  - window (rect) → 0.35
+- **door / window の優先順位**: arc 根拠がある opening は door を優先。同じ位置に door と window を二重追加しない（近傍重複除去）
 - PDF によっては curve 情報がなく、ギャップもないため `openings` が 0 件のままの場合もある
 
 ### scale-aware しきい値について
@@ -223,7 +233,8 @@ python3 -m pytest scripts/pipeline/tests/ -v
 | fixture | 内容 | 検証対象 |
 |---|---|---|
 | `line_only_doors_scale_1_50.pdf` | line ベースの壁 + gap opening + door arc | 壁抽出、gap 検出、arc 検出、arc-opening マッチ、arc-only door |
-| `walls_only_scale_1_50.pdf` | rect ベースの壁のみ（gap なし、curve なし） | 壁抽出、opening=0、arc=0 の確認 |
+| `walls_only_scale_1_50.pdf` | rect ベースの壁のみ（gap なし、curve なし） | 壁抽出、opening=0、arc=0、window=0 の確認 |
+| `windows_only_scale_1_50.pdf` | line ベースの壁 + 窓マーカー rect | 壁抽出、window 検出、door=0 の確認 |
 
 fixture の再生成が必要な場合:
 

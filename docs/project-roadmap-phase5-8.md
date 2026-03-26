@@ -443,20 +443,46 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
    - `scale=100` では paper mm しきい値が半分になる
 
 4. **fixture ベースの再現テスト** ✓
-   - `scripts/pipeline/tests/test_extract_pdf.py` (21 テスト)
-   - scale=50 後方互換、scale 追従、1対1 マッチ保証、arc-only door 確認
+   - `scripts/pipeline/tests/test_extract_pdf.py` (28 テスト)
+   - scale=50 後方互換、scale 追従、1対1 マッチ保証、arc-only door 確認、window 認識
    - `python3 -m pytest scripts/pipeline/tests/ -v` で実行
 
 5. **まだ高精度なドア記号認識ではない**
    - quarter-circle の簡易判定のみ。複雑なドア記号は未対応
-   - 窓枠認識は未実装
    - IFC 生成にはまだ進んでいない
+
+### Phase 8A 継続（窓枠認識の最小ルールベース追加）で完了したこと
+
+1. **rect パターンからの窓候補検出** ✓
+   - 壁近傍の細長い rect を窓マーカーとして検出
+   - `type: "window"` を `ExtractedOpening` に返す
+   - 条件: rect 長辺が実寸 500〜1800mm、短辺が実寸 200mm 以下、壁から実寸 150mm 以内
+
+2. **door / window の重複回避** ✓
+   - arc 根拠がある opening は door を優先
+   - 既存 door opening と近接する window 候補は除外（実寸 300mm 以内）
+   - 同じ位置に door と window を二重追加しない
+
+3. **scale-aware しきい値** ✓
+   - `min_window_width`, `max_window_width`, `max_window_marker_thickness`, `window_wall_distance`, `window_dedup_distance` を `_REAL_MM_BASES` に追加
+   - `derive_thresholds(scale)` で一括換算
+
+4. **fixture ベースの再現テスト** ✓
+   - `windows_only_scale_1_50.pdf` を追加（line 壁 + 窓マーカー rect）
+   - `TestWindowDetection` クラス (7 テスト) を追加
+   - 既存 door テスト (21 テスト) は全て維持
+   - 合計 28 テストが全て合格
+
+5. **まだ高精度な窓認識ではない**
+   - rect パターンの簡易判定のみ。二重線パターンは未対応
+   - 窓のサイズ・種類の判別は行っていない
+   - confidence は固定 0.35（低めに設定）
 
 ### 次のステップ（Phase 8B に向けて）
 
-1. **窓枠形状の認識**
-   - rect パターンから窓候補を推定
-   - `type: "window"` の判定精度向上
+1. **窓認識の精度向上**
+   - 二重線パターン（壁に沿った平行線対）の検出
+   - confidence の差別化
 
 2. **floorLabel の正式接続**
    - `createAmplifyJob` の request 拡張を検討
@@ -472,5 +498,6 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
 - GPU 前提の基盤整備
 - 大規模キューシステム導入
 - 本番運用前提の全自動化
-- 高精度なドア記号認識（複雑なドアシンボル・窓枠認識は Phase 8B 以降）
+- 高精度なドア記号認識（複雑なドアシンボルは Phase 8B 以降）
+- 高精度な窓認識（二重線パターン等は Phase 8B 以降）
 - IFC 本生成（構造化 JSON が先）

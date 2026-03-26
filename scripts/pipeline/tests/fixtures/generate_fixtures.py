@@ -24,6 +24,12 @@ fixture の構造を理解したいときや再生成が必要なときに使う
      - curve なし
      - opening 0 件、arc 0 件を確認するための fixture
 
+  3. windows_only_scale_1_50.pdf
+     - line ベースの壁（外壁 + 内壁）
+     - gap なし、arc なし
+     - 壁上に窓マーカー rect を配置（横壁上 1 + 縦壁上 1 = 計 2 箇所）
+     - type="window" の検出を確認するための fixture
+
 座標系: すべて paper mm (scale 1:50)。PDF 内部では pt (1pt = 1/72 inch = 0.3528mm)。
 ページサイズ: A4 横 (297mm x 210mm)
 """
@@ -308,6 +314,65 @@ def generate_walls_only():
 
 
 # ═══════════════════════════════════════════════════════════
+# Fixture 3: windows_only_scale_1_50.pdf
+# ═══════════════════════════════════════════════════════════
+
+def generate_windows_only():
+    """
+    line ベースの壁 + 窓マーカー rect の fixture。gap なし、arc なし。
+
+    構造 (paper mm, scale 1:50):
+    ┌────────────────────────────────┐  y=30
+    │                               │
+    │         [win1]                │  win1: 横壁 y=30 上の rect
+    │                               │
+    │                               │
+    │              ┌────────────────┤  y=110
+    │              │  [win2]        │  win2: 縦壁 x=150 上の rect
+    │              │                │
+    │              │                │
+    └──────────────┴────────────────┘  y=190
+    x=20        x=150            x=260
+
+    壁:
+    - 外壁 4 辺 (lines)
+    - 内壁: x=150 下半分、y=110 右側
+
+    窓マーカー (filled rect):
+    - win1: 横壁 y=30 上に、幅 20mm (= 1000mm real) の細い rect
+    - win2: 縦壁 x=150 上に、幅 16mm (= 800mm real) の細い rect
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=mm_to_pt(297), height=mm_to_pt(210))
+    shape = page.new_shape()
+
+    # ── 壁 (line) ──
+    draw_line(shape, 20, 30, 260, 30)      # Top: 240mm
+    draw_line(shape, 20, 190, 260, 190)    # Bottom: 240mm
+    draw_line(shape, 20, 30, 20, 190)      # Left: 160mm
+    draw_line(shape, 260, 30, 260, 190)    # Right: 160mm
+    draw_line(shape, 150, 110, 150, 190)   # Inner vertical: 80mm
+    draw_line(shape, 150, 110, 260, 110)   # Inner horizontal: 110mm
+
+    # ── 窓マーカー (filled rect) ──
+    # win1: 横壁 y=30 上、x=80 付近、幅 20mm (= 1000mm real)
+    # rect: 薄い水平 rect (幅 20mm × 高さ 2mm)、壁 y=30 に密着
+    draw_rect_filled(shape, 80, 29, 20, 2)
+
+    # win2: 縦壁 x=150 上、y=140 付近、幅 16mm (= 800mm real)
+    # rect: 薄い垂直 rect (幅 2mm × 高さ 16mm)、壁 x=150 に密着
+    draw_rect_filled(shape, 149, 140, 2, 16)
+
+    shape.commit()
+
+    out_path = os.path.join(FIXTURES_DIR, "windows_only_scale_1_50.pdf")
+    doc.save(out_path)
+    doc.close()
+    print(f"Generated: {out_path}")
+    return out_path
+
+
+# ═══════════════════════════════════════════════════════════
 # メイン
 # ═══════════════════════════════════════════════════════════
 
@@ -315,4 +380,5 @@ if __name__ == "__main__":
     print("Generating fixture PDFs...")
     generate_line_only()
     generate_walls_only()
+    generate_windows_only()
     print("Done.")

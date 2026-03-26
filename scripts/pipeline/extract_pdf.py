@@ -95,6 +95,7 @@ ARC_DOOR_CONFIDENCE = 0.6     # arc 根拠ありの door confidence
 ARC_ONLY_DOOR_CONFIDENCE = 0.5  # arc のみ (gap なし) の door confidence
 ARC_ASPECT_MIN = 0.7          # quarter-circle 判定の最小アスペクト比
 ARC_ASPECT_MAX = 1.4          # quarter-circle 判定の最大アスペクト比
+WINDOW_CONFIDENCE = 0.35      # window 候補の暫定 confidence
 
 # ═══════════════════════════════════════════════════════════
 # scale-aware しきい値（Phase 8A 暫定）
@@ -139,6 +140,12 @@ _REAL_MM_BASES: dict[str, float] = {
     "max_arc_radius": 1500.0,            # door arc 候補の最大半径
     "arc_match_distance": 1000.0,        # arc-opening を結びつける最大距離
     "arc_wall_distance": 250.0,          # arc 端点が壁線上にあると判定する距離
+    # ── 窓 ──
+    "min_window_width": 500.0,           # window 候補の最小幅（= rect 長辺）
+    "max_window_width": 1800.0,          # window 候補の最大幅
+    "max_window_marker_thickness": 200.0,  # window marker rect の短辺上限
+    "window_wall_distance": 150.0,       # rect 中心から壁線までの最大距離
+    "window_dedup_distance": 300.0,      # door/window 重複除去の距離
 }
 
 
@@ -864,6 +871,186 @@ def _enhance_openings_with_arcs(
     return openings
 
 
+# ═══════════════════════════════════════════════════════════
+# 窓候補の推定（Phase 8A 暫定 — rect パターンの最小ルール）
+#
+# 【方針】
+# PDF の drawing 情報から、壁上または壁近傍にある細長い rect を
+# 窓マーカーとして検出する。建築図面では窓を二重線や小さな
+# rect で表現することが多い。
+#
+# 【窓候補の判定ルール（暫定）】
+#   - rect の長辺が min_window_width 〜 max_window_width の範囲
+#   - rect の短辺が max_window_marker_thickness 以下（薄いマーカー）
+#   - rect の中心が壁線から window_wall_distance 以内
+#   - rect の長辺方向が壁と平行（水平壁に水平 rect、垂直壁に垂直 rect）
+#   - 既存の door opening と近すぎる場合は除外
+#   - ページ全体の背景矩形は除外
+#
+# このルールは暫定的なもの。高精度化は Phase 8B 以降で行う。
+# ═══════════════════════════════════════════════════════════
+
+
+def extract_windows(
+    page, walls: list[dict], existing_openings: list[dict], th: dict[str, float],
+) -> list[dict]:
+    """
+    drawing 情報の rect パターンから窓候補を抽出する。
+
+    壁近傍の細長い rect を窓マーカーとみなす最小ルール。
+    既存 opening (door 等) と近すぎる候補は除外する。
+
+    th: derive_thresholds() の返り値。
+    """
+    if not walls:
+        return []
+
+    min_w = th["min_window_width"]
+    max_w = th["max_window_width"]
+    max_marker_t = th["max_window_marker_thickness"]
+    wall_dist = th["window_wall_distance"]
+    dedup_dist = th["window_dedup_distance"]
+    default_h = th.get("default_opening_height", 5.0)
+
+    page_rect = page.rect
+    page_w_pt = page_rect.width
+    page_h_pt = page_rect.height
+
+    candidates: list[dict] = []
+    drawings = page.get_drawings()
+
+    for d in drawings:
+        for item in d["items"]:
+            if item[0] != "re":
+                continue
+
+            r = item[1]
+            # ページ全体の背景矩形は除外
+            if (abs(r.width) > page_w_pt * 0.95
+                    and abs(r.height) > page_h_pt * 0.95):
+                continue
+
+            w_mm = abs(r.width) * PT_TO_MM
+            h_mm = abs(r.height) * PT_TO_MM
+
+            # 長辺と短辺
+            long_side = max(w_mm, h_mm)
+            short_side = min(w_mm, h_mm)
+
+            # 窓幅チェック
+            if long_side < min_w or long_side > max_w:
+                continue
+            # マーカー薄さチェック
+            if short_side > max_marker_t:
+                continue
+
+            # rect の中心
+            cx = (r.x0 + r.x1) / 2 * PT_TO_MM
+            cy = (r.y0 + r.y1) / 2 * PT_TO_MM
+
+            # rect の向き (水平 or 垂直)
+            rect_is_horizontal = w_mm >= h_mm
+
+            # 壁との近接チェック + 平行チェック
+            best_wall = None
+            best_dist = float("inf")
+            for wall in walls:
+                wall_horiz = _is_horizontal(wall)
+                # rect と壁の向きが一致しなければスキップ
+                if rect_is_horizontal != wall_horiz:
+                    continue
+
+                wx1, wy1 = wall["startX"], wall["startY"]
+                wx2, wy2 = wall["endX"], wall["endY"]
+                dist = _point_to_segment_distance(cx, cy, wx1, wy1, wx2, wy2)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_wall = wall
+
+            if best_wall is None or best_dist > wall_dist:
+                continue
+
+            # 壁の辺として既にカウントされている大きな rect は除外
+            # (壁候補の厚み以下の短辺 + 壁候補以上の長辺 → 壁そのもの)
+            wall_min_len = th["min_wall_length"]
+            if long_side >= wall_min_len:
+                continue
+
+            candidates.append({
+                "centerX": round(cx, 1),
+                "centerY": round(cy, 1),
+                "width": round(long_side, 1),
+                "height": round(short_side, 1),
+                "wallId": best_wall.get("id"),
+                "_wall_dist": best_dist,
+            })
+
+    # 重複除去: 近接候補をまとめる (最も壁に近いものを残す)
+    merged = _dedup_window_candidates(candidates, dedup_dist)
+
+    # 既存 opening (door 等) と近すぎるものを除外
+    windows: list[dict] = []
+    for cand in merged:
+        too_close = False
+        for op in existing_openings:
+            d = math.sqrt(
+                (cand["centerX"] - op["centerX"]) ** 2
+                + (cand["centerY"] - op["centerY"]) ** 2
+            )
+            if d <= dedup_dist:
+                too_close = True
+                break
+        if not too_close:
+            windows.append({
+                "id": "",
+                "type": "window",
+                "centerX": cand["centerX"],
+                "centerY": cand["centerY"],
+                "width": cand["width"],
+                "height": cand["height"],
+                "wallId": cand["wallId"],
+                "confidence": WINDOW_CONFIDENCE,
+            })
+
+    print(
+        f"[window-detect] raw_candidates={len(candidates)}, "
+        f"merged={len(merged)}, after_dedup={len(windows)}",
+        file=sys.stderr,
+    )
+
+    return windows
+
+
+def _dedup_window_candidates(
+    candidates: list[dict], dedup_dist: float,
+) -> list[dict]:
+    """近接する window 候補を統合する。壁に近い方を残す。"""
+    if not candidates:
+        return []
+
+    # 壁に近い順にソート
+    sorted_cands = sorted(candidates, key=lambda c: c["_wall_dist"])
+    used = [False] * len(sorted_cands)
+    result: list[dict] = []
+
+    for i, cand in enumerate(sorted_cands):
+        if used[i]:
+            continue
+        result.append(cand)
+        # 近接候補を除外
+        for j in range(i + 1, len(sorted_cands)):
+            if used[j]:
+                continue
+            d = math.sqrt(
+                (cand["centerX"] - sorted_cands[j]["centerX"]) ** 2
+                + (cand["centerY"] - sorted_cands[j]["centerY"]) ** 2
+            )
+            if d <= dedup_dist:
+                used[j] = True
+
+    return result
+
+
 def _find_nearest_wall_for_arc(
     arc: dict, walls: list[dict], th: dict[str, float],
 ) -> str | None:
@@ -935,11 +1122,15 @@ def extract_floor_data(
     # --- 壁候補の抽出 ---
     walls = extract_walls(page, th)
 
-    # --- 開口部候補の推定（gap ベース + arc ベース） ---
+    # --- 開口部候補の推定（gap ベース + arc ベース + 窓） ---
     openings = extract_openings(walls, th)
 
     door_arcs = _extract_door_arcs(page, th)
     openings = _enhance_openings_with_arcs(openings, door_arcs, walls, th)
+
+    # --- 窓候補の推定（rect パターン） ---
+    windows = extract_windows(page, walls, openings, th)
+    openings.extend(windows)
 
     # id を振り直し、内部フラグを除去
     arc_confirmed = sum(1 for op in openings if op.get("_arc_matched"))
@@ -954,7 +1145,8 @@ def extract_floor_data(
         type_counts[t] = type_counts.get(t, 0) + 1
     print(
         f"[opening-arc] arcs={len(door_arcs)}, arc_confirmed={arc_confirmed}, "
-        f"total_openings={len(openings)}, types={type_counts}, scale={scale}",
+        f"windows={len(windows)}, total_openings={len(openings)}, "
+        f"types={type_counts}, scale={scale}",
         file=sys.stderr,
     )
 
