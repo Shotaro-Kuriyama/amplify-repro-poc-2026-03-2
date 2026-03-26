@@ -1,0 +1,5 @@
+# Phase 8A: 開発・テスト用の追加依存
+# インストール: pip install -r scripts/pipeline/requirements-dev.txt
+# 本番依存 (requirements.txt) に加えて以下が必要:
+PyMuPDF>=1.24.0
+pytest>=8.0.0

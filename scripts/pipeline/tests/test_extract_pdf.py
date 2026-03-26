@@ -2,20 +2,27 @@
 Phase 8A: extract_pdf.py の fixture ベース再現テスト
 
 テスト方針:
-- A: scale=50 での後方互換確認（既存サンプル PDF）
+- A: scale=50 での後方互換確認（fixture PDF）
 - B: scale 変更時の threshold 追従確認
 - C: arc-opening の 1対1 マッチ保証（合成データ）
 - D: arc-only door 候補の生成確認（合成データ）
 
+fixture:
+- line_only_doors_scale_1_50.pdf
+    line ベースの壁 + gap-based opening 1 件 + door arc 3 本。
+    gap+arc マッチ 1 件 (conf 0.6) + arc-only door 2 件 (conf 0.5)。
+- walls_only_scale_1_50.pdf
+    rect ベースの壁のみ。opening 0 件、arc 0 件。
+
 実行方法:
   cd amplify-mock
+  pip install -r scripts/pipeline/requirements-dev.txt
   python3 -m pytest scripts/pipeline/tests/ -v
 """
 
 from __future__ import annotations
 
 import math
-import os
 import sys
 from pathlib import Path
 
@@ -35,13 +42,11 @@ from extract_pdf import (
     _point_to_segment_distance,
 )
 
-# ── fixture 用のサンプル PDF パス ──
-# repo root からの相対パスで指定
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-LINE_ONLY_PDF = REPO_ROOT / "data" / "uploads" / "file-1774492721211-0" / \
-    "sample_house_floorplan_2D_line_only_A4_landscape_scale_1_50.pdf"
-WALLS_ONLY_PDF = REPO_ROOT / "data" / "uploads" / "file-1774492759361-0" / \
-    "sample_house_floorplan_2D_walls_only_A4_landscape_scale_1_50.pdf"
+# ── fixture PDF パス ──
+# repo 内の正式な fixture を参照（data/uploads/ には依存しない）
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+LINE_ONLY_PDF = FIXTURES_DIR / "line_only_doors_scale_1_50.pdf"
+WALLS_ONLY_PDF = FIXTURES_DIR / "walls_only_scale_1_50.pdf"
 
 
 def _have_fitz():
@@ -57,36 +62,41 @@ needs_fitz = pytest.mark.skipif(
     not _have_fitz(), reason="PyMuPDF (fitz) not installed"
 )
 needs_line_only = pytest.mark.skipif(
-    not LINE_ONLY_PDF.exists(), reason="line_only sample PDF not found"
+    not LINE_ONLY_PDF.exists(), reason="line_only fixture PDF not found"
 )
 needs_walls_only = pytest.mark.skipif(
-    not WALLS_ONLY_PDF.exists(), reason="walls_only sample PDF not found"
+    not WALLS_ONLY_PDF.exists(), reason="walls_only fixture PDF not found"
 )
 
 
 # ═══════════════════════════════════════════════════════════
 # テスト A: scale=50 での後方互換確認
+#
+# fixture の期待値:
+#   line_only: walls=8, gap_openings=1, arcs=3, total_openings=3
+#   walls_only: walls=6, openings=0, arcs=0
 # ═══════════════════════════════════════════════════════════
 
 class TestScaleBackwardCompat:
-    """scale=50 で既存挙動が大きく壊れていないことを確認する。"""
+    """scale=50 で fixture から期待通りの結果が得られることを確認する。"""
 
     @needs_fitz
     @needs_line_only
     def test_line_only_walls_count(self):
-        """line_only PDF で壁候補が 13 本前後であること。"""
+        """line_only fixture で壁候補が 8 本であること。
+        外壁 4 + 内壁 y=110 左右 2 + x=150 + x=210 = 8 本。
+        ただし merge 状況により ±1 の余裕を持つ。"""
         import fitz
         doc = fitz.open(str(LINE_ONLY_PDF))
         th = derive_thresholds(50)
         walls = extract_walls(doc[0], th)
         doc.close()
-        # 以前の実装では 13 本。±2 の余裕を持つ
-        assert 11 <= len(walls) <= 15, f"expected ~13 walls, got {len(walls)}"
+        assert 7 <= len(walls) <= 9, f"expected ~8 walls, got {len(walls)}"
 
     @needs_fitz
     @needs_line_only
     def test_line_only_openings_count(self):
-        """line_only PDF で opening が 9 件前後であること（gap 1 + arc 8）。"""
+        """line_only fixture で opening が 3 件であること（gap 1 + arc-only 2）。"""
         import fitz
         doc = fitz.open(str(LINE_ONLY_PDF))
         th = derive_thresholds(50)
@@ -96,13 +106,13 @@ class TestScaleBackwardCompat:
         arcs = _extract_door_arcs(page, th)
         openings = _enhance_openings_with_arcs(openings, arcs, walls, th)
         doc.close()
-        # gap-based 1 + arc-based 8 = 9
-        assert len(openings) >= 8, f"expected >=8 openings, got {len(openings)}"
+        # gap 1 + arc-only 2 = 3
+        assert len(openings) >= 2, f"expected >=2 openings, got {len(openings)}"
 
     @needs_fitz
     @needs_line_only
     def test_line_only_door_count(self):
-        """line_only PDF で全 opening が door タイプであること。"""
+        """line_only fixture で全 opening が door タイプであること。"""
         import fitz
         doc = fitz.open(str(LINE_ONLY_PDF))
         th = derive_thresholds(50)
@@ -118,7 +128,7 @@ class TestScaleBackwardCompat:
     @needs_fitz
     @needs_walls_only
     def test_walls_only_no_openings(self):
-        """walls_only PDF で opening が 0 件であること。"""
+        """walls_only fixture で opening が 0 件であること。"""
         import fitz
         doc = fitz.open(str(WALLS_ONLY_PDF))
         th = derive_thresholds(50)
@@ -133,13 +143,14 @@ class TestScaleBackwardCompat:
     @needs_fitz
     @needs_walls_only
     def test_walls_only_walls_count(self):
-        """walls_only PDF で壁候補が 13 本前後であること。"""
+        """walls_only fixture で壁候補が 6 本であること。
+        外壁 4 辺 × 4 edges each = rect → filtered、内壁 2 本。"""
         import fitz
         doc = fitz.open(str(WALLS_ONLY_PDF))
         th = derive_thresholds(50)
         walls = extract_walls(doc[0], th)
         doc.close()
-        assert 11 <= len(walls) <= 15, f"expected ~13 walls, got {len(walls)}"
+        assert 5 <= len(walls) <= 8, f"expected ~6 walls, got {len(walls)}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -286,7 +297,7 @@ class TestOneToOneMatching:
     @needs_fitz
     @needs_line_only
     def test_real_pdf_one_to_one(self):
-        """実 PDF で arc と opening が 1対1 になっていること。"""
+        """fixture PDF で arc と opening が 1対1 になっていること。"""
         import fitz
         doc = fitz.open(str(LINE_ONLY_PDF))
         th = derive_thresholds(50)
@@ -369,7 +380,7 @@ class TestArcOnlyDoor:
     @needs_fitz
     @needs_line_only
     def test_real_pdf_arc_only_doors(self):
-        """line_only PDF で arc-only door が存在すること。"""
+        """line_only fixture で arc-only door が存在すること。"""
         import fitz
         doc = fitz.open(str(LINE_ONLY_PDF))
         th = derive_thresholds(50)

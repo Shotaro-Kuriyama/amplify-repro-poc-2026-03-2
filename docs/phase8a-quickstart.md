@@ -208,8 +208,27 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 ### テストの実行
 
 ```bash
+# テスト用依存のインストール
+pip3 install -r scripts/pipeline/requirements-dev.txt
+
 # fixture ベースの再現テスト
 python3 -m pytest scripts/pipeline/tests/ -v
+```
+
+### fixture PDF について
+
+テスト用の fixture PDF は `scripts/pipeline/tests/fixtures/` に正式配置されている。
+`data/uploads/` への依存はなく、fresh clone 後でもそのままテスト実行可能。
+
+| fixture | 内容 | 検証対象 |
+|---|---|---|
+| `line_only_doors_scale_1_50.pdf` | line ベースの壁 + gap opening + door arc | 壁抽出、gap 検出、arc 検出、arc-opening マッチ、arc-only door |
+| `walls_only_scale_1_50.pdf` | rect ベースの壁のみ（gap なし、curve なし） | 壁抽出、opening=0、arc=0 の確認 |
+
+fixture の再生成が必要な場合:
+
+```bash
+python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 ```
 
 ## 現時点の制約（まだダミー・未実装の部分）
