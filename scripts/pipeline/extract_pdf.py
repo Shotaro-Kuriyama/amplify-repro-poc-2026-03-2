@@ -86,6 +86,13 @@ MAX_ANGLE_DEV_DEG = 5.0      # 水平/垂直からの許容角度差（度）
 DEFAULT_THICKNESS_MM = 150.0  # stroke width が不明な場合のデフォルト壁厚
 DEFAULT_CONFIDENCE = 0.5      # 暫定の固定 confidence
 
+# ── 重複除去・マージの閾値（暫定） ──
+# これらの値は暫定的なもの。PDF の解像度や図面縮尺によっては
+# 調整が必要になる可能性がある。高精度化は Phase 8B 以降で行う。
+DEDUP_TOLERANCE_MM = 2.0     # 始点・終点がこの距離以内なら「同一 wall」とみなす
+COLLINEAR_TOLERANCE_MM = 3.0  # 垂直方向の座標差がこの範囲内なら「同一直線上」とみなす
+MERGE_GAP_MM = 5.0           # 端点間のギャップがこの範囲内ならマージ対象
+
 
 def _extract_line_segments(page) -> list[dict]:
     """
@@ -175,16 +182,15 @@ def _segment_length(seg: dict) -> float:
     return math.sqrt(dx * dx + dy * dy)
 
 
-def extract_walls(page) -> list[dict]:
+def _extract_raw_walls(page) -> list[dict]:
     """
-    drawing 情報から壁候補を抽出する。
+    drawing 情報から壁候補を抽出する（正規化・重複除去前の raw データ）。
 
     返り値は ExtractedWall の shape に合致する dict のリスト。
-    座標・thickness はすべて mm 単位。
+    座標・thickness はすべて mm 単位。id は仮のもの（後で振り直す）。
     """
     segments = _extract_line_segments(page)
     walls = []
-    wall_id = 0
 
     for seg in segments:
         length = _segment_length(seg)
@@ -200,7 +206,6 @@ def extract_walls(page) -> list[dict]:
             thickness = DEFAULT_THICKNESS_MM
 
         walls.append({
-            "id": f"wall-{wall_id}",
             "startX": round(seg["x1"], 1),
             "startY": round(seg["y1"], 1),
             "endX": round(seg["x2"], 1),
@@ -208,9 +213,194 @@ def extract_walls(page) -> list[dict]:
             "thickness": round(thickness, 1),
             "confidence": DEFAULT_CONFIDENCE,
         })
-        wall_id += 1
 
     return walls
+
+
+# ═══════════════════════════════════════════════════════════
+# 壁候補の正規化・重複除去・マージ（Phase 8A 継続 — 暫定ルールベース）
+#
+# 処理パイプライン:
+#   raw walls → 正規化 → 重複除去 → 同一直線上マージ → id 振り直し
+#
+# 【正規化】
+#   水平線: startX <= endX に統一
+#   垂直線: startY <= endY に統一
+#   → 方向の違いによる重複判定漏れを防ぐ
+#
+# 【重複除去】
+#   始点・終点がともに DEDUP_TOLERANCE_MM (2mm) 以内の wall を同一とみなす
+#   重複時は thickness が大きい方を残す（より信頼性が高い壁厚情報を優先）
+#
+# 【同一直線上マージ】
+#   水平線同士/垂直線同士で:
+#   - 垂直方向の座標差が COLLINEAR_TOLERANCE_MM (3mm) 以内
+#   - 端点間のギャップが MERGE_GAP_MM (5mm) 以内、または重なっている
+#   場合に 1 本にまとめる
+#   thickness は最大値を採用、confidence は固定値のまま
+#
+# これらの閾値は暫定的なもの。高精度化は Phase 8B 以降で行う。
+# ═══════════════════════════════════════════════════════════
+
+
+def _is_horizontal(wall: dict) -> bool:
+    """wall が水平方向かどうかを判定する。"""
+    return abs(wall["endX"] - wall["startX"]) >= abs(wall["endY"] - wall["startY"])
+
+
+def _normalize_walls(walls: list[dict]) -> list[dict]:
+    """
+    壁候補の方向を正規化する。
+
+    水平線: startX <= endX に統一
+    垂直線: startY <= endY に統一
+    """
+    result = []
+    for w in walls:
+        if _is_horizontal(w):
+            if w["startX"] > w["endX"]:
+                w = {**w, "startX": w["endX"], "startY": w["endY"],
+                     "endX": w["startX"], "endY": w["startY"]}
+        else:
+            if w["startY"] > w["endY"]:
+                w = {**w, "startX": w["endX"], "startY": w["endY"],
+                     "endX": w["startX"], "endY": w["startY"]}
+        result.append(w)
+    return result
+
+
+def _deduplicate_walls(walls: list[dict]) -> list[dict]:
+    """
+    ほぼ同一の壁候補を除去する。
+
+    始点・終点がともに DEDUP_TOLERANCE_MM 以内の wall を同一とみなす。
+    重複時は thickness が大きい方を残す。
+    """
+    result: list[dict] = []
+    for wall in walls:
+        dup_idx = None
+        for i, existing in enumerate(result):
+            if (abs(wall["startX"] - existing["startX"]) <= DEDUP_TOLERANCE_MM
+                    and abs(wall["startY"] - existing["startY"]) <= DEDUP_TOLERANCE_MM
+                    and abs(wall["endX"] - existing["endX"]) <= DEDUP_TOLERANCE_MM
+                    and abs(wall["endY"] - existing["endY"]) <= DEDUP_TOLERANCE_MM):
+                dup_idx = i
+                break
+        if dup_idx is not None:
+            # 重複 → thickness が大きい方を残す
+            if wall["thickness"] > result[dup_idx]["thickness"]:
+                result[dup_idx] = wall
+        else:
+            result.append(wall)
+    return result
+
+
+def _merge_collinear_walls(walls: list[dict]) -> list[dict]:
+    """
+    同一直線上で近接・接続する壁候補をマージする。
+
+    水平線同士/垂直線同士を対象に、
+    垂直方向の座標差が COLLINEAR_TOLERANCE_MM 以内で
+    端点間が MERGE_GAP_MM 以内（または重なり）なら 1 本にまとめる。
+    """
+    h_walls = [w for w in walls if _is_horizontal(w)]
+    v_walls = [w for w in walls if not _is_horizontal(w)]
+
+    merged_h = _merge_axis_group(h_walls, axis="h")
+    merged_v = _merge_axis_group(v_walls, axis="v")
+
+    return merged_h + merged_v
+
+
+def _merge_axis_group(walls: list[dict], axis: str) -> list[dict]:
+    """
+    同一軸グループ内でマージする。
+
+    axis="h": 水平線。Y 座標が近いものを同一直線とみなし、X 方向でマージ
+    axis="v": 垂直線。X 座標が近いものを同一直線とみなし、Y 方向でマージ
+    """
+    if not walls:
+        return []
+
+    if axis == "h":
+        # Y で並べ、同じ Y グループ内を startX 順に
+        walls_sorted = sorted(walls, key=lambda w: (w["startY"], w["startX"]))
+    else:
+        # X で並べ、同じ X グループ内を startY 順に
+        walls_sorted = sorted(walls, key=lambda w: (w["startX"], w["startY"]))
+
+    merged = [dict(walls_sorted[0])]  # コピーして使う
+
+    for wall in walls_sorted[1:]:
+        prev = merged[-1]
+
+        if axis == "h":
+            same_line = abs(wall["startY"] - prev["startY"]) <= COLLINEAR_TOLERANCE_MM
+            # wall は startX 順なので、prev の endX + GAP >= wall の startX なら接続
+            adjacent = same_line and wall["startX"] <= prev["endX"] + MERGE_GAP_MM
+        else:
+            same_line = abs(wall["startX"] - prev["startX"]) <= COLLINEAR_TOLERANCE_MM
+            adjacent = same_line and wall["startY"] <= prev["endY"] + MERGE_GAP_MM
+
+        if adjacent:
+            # マージ: 長い方に延長する
+            if axis == "h":
+                prev["endX"] = max(prev["endX"], wall["endX"])
+                # Y 座標は平均に寄せる
+                avg_y = round((prev["startY"] + wall["startY"]) / 2, 1)
+                prev["startY"] = avg_y
+                prev["endY"] = avg_y
+            else:
+                prev["endY"] = max(prev["endY"], wall["endY"])
+                avg_x = round((prev["startX"] + wall["startX"]) / 2, 1)
+                prev["startX"] = avg_x
+                prev["endX"] = avg_x
+            # thickness は最大値を採用
+            prev["thickness"] = max(prev["thickness"], wall["thickness"])
+        else:
+            merged.append(dict(wall))
+
+    return merged
+
+
+def extract_walls(page) -> list[dict]:
+    """
+    drawing 情報から壁候補を抽出し、整理して返す。
+
+    処理パイプライン:
+      1. drawing から raw な壁候補を抽出
+      2. 方向を正規化
+      3. ほぼ同一の重複を除去
+      4. 同一直線上の近接壁をマージ
+      5. wall-0, wall-1, ... と id を振り直す
+
+    返り値は ExtractedWall の shape に合致する dict のリスト。
+    座標・thickness はすべて mm 単位。
+    """
+    # Step 1: raw 抽出
+    raw = _extract_raw_walls(page)
+
+    # Step 2: 正規化
+    normalized = _normalize_walls(raw)
+
+    # Step 3: 重複除去
+    deduped = _deduplicate_walls(normalized)
+
+    # Step 4: 同一直線上マージ
+    merged = _merge_collinear_walls(deduped)
+
+    # Step 5: id 振り直し
+    for i, wall in enumerate(merged):
+        wall["id"] = f"wall-{i}"
+
+    # デバッグ用ログ（stderr に出力。stdout は JSON プロトコル用なので汚さない）
+    print(
+        f"[wall-extract] raw={len(raw)}, normalized={len(normalized)}, "
+        f"deduped={len(deduped)}, merged={len(merged)}",
+        file=sys.stderr,
+    )
+
+    return merged
 
 
 def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0) -> dict:

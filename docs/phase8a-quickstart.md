@@ -133,9 +133,13 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 
 ### walls に関する補足
 
-- Phase 8A 後半で、PDF の drawing 情報から壁候補を暫定ルールベースで抽出するようになった
+- PDF の drawing 情報から壁候補を暫定ルールベースで抽出している
+- 抽出後に **正規化 → 重複除去 → 同一直線上マージ** の整理パイプラインを通している
 - **精度は暫定**。長さ 50mm 以上かつ水平/垂直に近い線分を壁候補として扱っている
+- 重複除去: 始点・終点がともに 2mm 以内の wall を同一とみなす
+- マージ: 同一直線上 (3mm 以内) で端点間ギャップが 5mm 以内の壁を 1 本にまとめる
 - PDF によっては drawing 情報が無く `walls` が 0 本のままの場合もある（テキスト主体の PDF など）
+- 壁本数は PDF の描画方法（line / rect / 混在）によって異なる
 - 壁厚 (`thickness`) は線の stroke width または矩形の短辺から推定（暫定値）
 - 信頼度 (`confidence`) は固定値 0.5
 
@@ -143,7 +147,7 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 
 | 項目 | 状態 |
 |---|---|
-| `walls` | drawing 情報から暫定ルールで抽出（精度は低い。curve/arc は未対応） |
+| `walls` | drawing 情報から暫定ルールで抽出 + 重複整理・マージ済み（精度は低い。curve/arc は未対応） |
 | `openings` | 空配列（開口部推定は Phase 8A 後半以降） |
 | `rooms` | テキストブロックから簡易抽出（精度は低い） |
 | `floorLabel` | サーバー側で `1F, 2F...` と自動採番（暫定。フロントの設定とは未連携） |
