@@ -341,7 +341,6 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
    - `scripts/pipeline/extract_pdf.py` を追加（PyMuPDF 使用）
    - ページサイズ取得、テキストブロックからの部屋名候補抽出
    - `PipelineOutput` の shape に沿った JSON を返却
-   - `walls` / `openings` は空配列（Phase 8A 後半で実装予定）
 
 3. **内部用 API エンドポイント** ✓
    - `POST /api/internal/pipeline/run` を追加
@@ -351,14 +350,27 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
 4. **動作確認ガイド** ✓
    - `docs/phase8a-quickstart.md` に手順を記載
 
-### 次のステップ（Phase 8A 後半に向けて）
+### Phase 8A 後半（線分抽出・壁候補推定）で完了したこと
 
-1. **線分抽出と壁の推定**
-   - PyMuPDF の `page.get_drawings()` で線分情報を抽出
-   - 直線の長さ・角度・近接度から壁候補を推定
-   - `ExtractedWall` を実データで埋める
+1. **drawing 情報からの線分抽出** ✓
+   - `page.get_drawings()` から line / rect を抽出
+   - curve / bezier / arc は今回は対象外
+   - 座標は mm 単位に統一
 
-2. **開口部の推定**
+2. **最小ルールベースでの壁候補推定** ✓
+   - 長さ 50mm 以上、水平/垂直から 5° 以内の線分を壁候補として採用
+   - `ExtractedWall[]` を実データで返却
+   - `stats.totalWalls` を実データで更新
+   - thickness は stroke width または矩形短辺から推定（暫定）
+   - confidence は固定値 0.5（暫定）
+
+3. **精度は暫定**
+   - 高精度化は Phase 8B 以降で行う
+   - 斜め壁、曲線壁、開口部はまだ未対応
+
+### 次のステップ（Phase 8A 後半の続き〜Phase 8B に向けて）
+
+1. **開口部の推定**
    - 壁の途切れ・円弧パターンからドア・窓を推定
    - `ExtractedOpening` を実データで埋める
 

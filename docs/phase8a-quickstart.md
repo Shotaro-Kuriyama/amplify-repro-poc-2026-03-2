@@ -85,14 +85,24 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
   "floors": [
     {
       "floorLabel": "1F",
-      "walls": [],
+      "walls": [
+        {
+          "id": "wall-0",
+          "startX": 18.0,
+          "startY": 192.0,
+          "endX": 258.0,
+          "endY": 192.0,
+          "thickness": 5.0,
+          "confidence": 0.5
+        }
+      ],
       "openings": [],
       "rooms": [...],
       "source": {
         "fileId": "file-1711234567890-0",
         "pageIndex": 0,
-        "pageWidth": 420.0,
-        "pageHeight": 297.0
+        "pageWidth": 297.0,
+        "pageHeight": 210.0
       }
     }
   ],
@@ -100,14 +110,14 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
     {
       "format": "structured_json",
       "filePath": "(inline)",
-      "size": 1234
+      "size": 4228
     }
   ],
   "stats": {
-    "durationMs": 50,
-    "totalWalls": 0,
+    "durationMs": 15,
+    "totalWalls": 20,
     "totalOpenings": 0,
-    "totalRooms": 3
+    "totalRooms": 10
   }
 }
 ```
@@ -117,14 +127,24 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 - `success: true` であること
 - `floors[0].source.pageWidth` / `pageHeight` にページサイズ（mm 単位）が入っていること
 - `floors[0].rooms` にテキストブロックから抽出した部屋名候補が入っていること（PDF にテキストがあれば）
+- `floors[0].walls` に壁候補が入っていること（drawing 情報を含む PDF の場合）
+- `stats.totalWalls` が 0 以外であること（drawing 情報を含む PDF の場合）
 - `stats.durationMs` に処理時間が入っていること
+
+### walls に関する補足
+
+- Phase 8A 後半で、PDF の drawing 情報から壁候補を暫定ルールベースで抽出するようになった
+- **精度は暫定**。長さ 50mm 以上かつ水平/垂直に近い線分を壁候補として扱っている
+- PDF によっては drawing 情報が無く `walls` が 0 本のままの場合もある（テキスト主体の PDF など）
+- 壁厚 (`thickness`) は線の stroke width または矩形の短辺から推定（暫定値）
+- 信頼度 (`confidence`) は固定値 0.5
 
 ## 現時点の制約（まだダミー・未実装の部分）
 
 | 項目 | 状態 |
 |---|---|
-| `walls` | 空配列（線分抽出は Phase 8A 後半） |
-| `openings` | 空配列（開口部推定は Phase 8A 後半） |
+| `walls` | drawing 情報から暫定ルールで抽出（精度は低い。curve/arc は未対応） |
+| `openings` | 空配列（開口部推定は Phase 8A 後半以降） |
 | `rooms` | テキストブロックから簡易抽出（精度は低い） |
 | `floorLabel` | サーバー側で `1F, 2F...` と自動採番（暫定。フロントの設定とは未連携） |
 | `artifacts` | `structured_json` のみ、インラインで返却（ファイル書き出しなし） |
