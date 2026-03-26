@@ -177,7 +177,7 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
   1. **gap ベース**: 壁マージ後のギャップから推定（door / unknown）
   2. **arc ベース**: drawing の cubic bezier (curve) からドア円弧を検出（door）
   3. **rect ベース**: 壁近傍の細長い rect パターンから窓候補を検出（window）
-- **精度は暫定**。高精度なドア記号認識や窓枠検出は行っていない
+- **精度は暫定**。高精度なドア記号認識や窓種別判定は行っていない
 - **scale-aware**: すべてのしきい値は `settings.scale` から導出（実寸 mm ベース）
 - **1対1 マッチ保証**: arc-opening の対応は greedy distance matching で 1対1 を保証
 - gap ベースの条件:
@@ -247,7 +247,7 @@ python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 | 項目 | 状態 |
 |---|---|
 | `walls` | drawing 情報から暫定ルールで抽出 + 重複整理・マージ済み（精度は低い。curve/arc は未対応） |
-| `openings` | gap + arc ベースで暫定推定（精度は低い。窓枠認識は未対応） |
+| `openings` | gap + arc + rect ベースで暫定推定（door / window / unknown。精度は低い） |
 | `rooms` | テキストブロックから簡易抽出（精度は低い） |
 | `floorLabel` | サーバー側で `1F, 2F...` と自動採番（暫定。フロントの設定とは未連携） |
 | `artifacts` | `structured_json` のみ、インラインで返却（ファイル書き出しなし） |
