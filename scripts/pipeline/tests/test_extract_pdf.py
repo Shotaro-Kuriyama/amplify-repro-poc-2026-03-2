@@ -95,19 +95,23 @@ class TestScaleBackwardCompat:
 
     @needs_fitz
     @needs_line_only
-    def test_line_only_openings_count(self):
-        """line_only fixture で opening が 3 件であること（gap 1 + arc-only 2）。"""
+    def test_line_only_openings_breakdown(self):
+        """line_only fixture の opening 内訳: gap=1, arcs=3, total=3。"""
         import fitz
         doc = fitz.open(str(LINE_ONLY_PDF))
         th = derive_thresholds(50)
         page = doc[0]
         walls = extract_walls(page, th)
-        openings = extract_openings(walls, th)
+        gap_openings = extract_openings(walls, th)
         arcs = _extract_door_arcs(page, th)
-        openings = _enhance_openings_with_arcs(openings, arcs, walls, th)
+        all_openings = _enhance_openings_with_arcs(list(gap_openings), arcs, walls, th)
         doc.close()
-        # gap 1 + arc-only 2 = 3
-        assert len(openings) >= 2, f"expected >=2 openings, got {len(openings)}"
+        # fixture 設計: gap 1 箇所 (y=110, x=72..90)
+        assert len(gap_openings) == 1, f"expected 1 gap opening, got {len(gap_openings)}"
+        # fixture 設計: arc 3 本
+        assert len(arcs) == 3, f"expected 3 arcs, got {len(arcs)}"
+        # gap+arc マッチ 1 + arc-only 2 = 3
+        assert len(all_openings) == 3, f"expected 3 total openings, got {len(all_openings)}"
 
     @needs_fitz
     @needs_line_only
@@ -144,13 +148,14 @@ class TestScaleBackwardCompat:
     @needs_walls_only
     def test_walls_only_walls_count(self):
         """walls_only fixture で壁候補が 6 本であること。
-        外壁 4 辺 × 4 edges each = rect → filtered、内壁 2 本。"""
+        外壁 4 辺 (rect → 長辺のみ壁候補) + 内壁 2 本 = 6。
+        rect の 4 辺分解で短辺もカウントされる可能性があるため ±1。"""
         import fitz
         doc = fitz.open(str(WALLS_ONLY_PDF))
         th = derive_thresholds(50)
         walls = extract_walls(doc[0], th)
         doc.close()
-        assert 5 <= len(walls) <= 8, f"expected ~6 walls, got {len(walls)}"
+        assert 5 <= len(walls) <= 7, f"expected ~6 walls, got {len(walls)}"
 
 
 # ═══════════════════════════════════════════════════════════
