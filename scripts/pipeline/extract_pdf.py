@@ -11,7 +11,7 @@ Phase 8A: 最小 PDF 処理スクリプト
 - ページ数、ページサイズの取得
 - テキスト抽出（取れれば）
 - drawing 情報から線分を抽出し、最小ルールで壁候補を推定
-- openings は空配列（Phase 8A 後半以降で実装予定）
+- 壁候補間のギャップから開口部候補を暫定推定（Phase 8A 暫定）
 
 使用ライブラリ: PyMuPDF (fitz)
   pip install PyMuPDF
@@ -114,6 +114,25 @@ FALLBACK_THICKNESS_MM = 5.0   # 全く手がかりがない場合のデフォル
 DEDUP_TOLERANCE_MM = 2.0     # 始点・終点がこの距離以内なら「同一 wall」とみなす
 COLLINEAR_TOLERANCE_MM = 3.0  # 垂直方向の座標差がこの範囲内なら「同一直線上」とみなす
 MERGE_GAP_MM = 5.0           # 端点間のギャップがこの範囲内ならマージ対象
+
+# ── 開口部推定の閾値（Phase 8A 暫定） ──
+#
+# 【推定方針】
+# 壁マージ後に残るギャップ (> MERGE_GAP_MM) のうち、一定幅のものを開口部候補とみなす。
+# 同一直線上の壁が 2 本以上あり、その間に MIN_OPENING_WIDTH_MM 〜 MAX_OPENING_WIDTH_MM
+# のギャップがある場合に開口部候補を生成する。
+#
+# これは暫定ルール。円弧ドア判定や窓枠認識は Phase 8B 以降で行う。
+#
+MIN_OPENING_WIDTH_MM = 8.0    # これ未満のギャップは開口部にしない (paper mm)
+                               # (1:50 で 8mm = 400mm 実寸。小さすぎるギャップを除外)
+MAX_OPENING_WIDTH_MM = 40.0   # これ超のギャップは開口部にしない (paper mm)
+                               # (1:50 で 40mm = 2000mm 実寸。巨大すぎるギャップは壁の欠損)
+DOOR_THRESHOLD_MM = 14.0      # gap >= この値 → "door" 寄り (paper mm)
+                               # (1:50 で 14mm = 700mm 実寸。一般的なドア幅は 700-900mm)
+OPENING_COLLINEAR_TOLERANCE_MM = 1.5  # 開口部検出用の同一直線判定 (壁マージ後なので厳しめ)
+DEFAULT_OPENING_HEIGHT_MM = 5.0  # opening の height 仮値 (壁厚ベース)
+OPENING_CONFIDENCE = 0.4      # 開口部の暫定 confidence (壁より低い)
 
 
 def _extract_line_segments(page) -> list[dict]:
@@ -533,6 +552,172 @@ def extract_walls(page) -> list[dict]:
     return merged
 
 
+# ═══════════════════════════════════════════════════════════
+# 開口部候補の推定（Phase 8A 暫定 — ギャップベースの最小ルール）
+#
+# 【方針】
+# 壁マージ後の壁リストを使い、同一直線上の壁間ギャップから開口部を推定する。
+# マージ処理で MERGE_GAP_MM (5mm) 以下のギャップは既に結合されているため、
+# 残っているギャップは意図的な開口部の可能性が高い。
+#
+# 【対象】
+#   - 水平壁同士のギャップ (Y 座標が近い壁間の X 方向のギャップ)
+#   - 垂直壁同士のギャップ (X 座標が近い壁間の Y 方向のギャップ)
+#   - 斜め壁は対象外
+#
+# 【type の分類ルール（暫定）】
+#   - gap >= DOOR_THRESHOLD_MM → "door"
+#   - gap < DOOR_THRESHOLD_MM → "unknown" (窓と断定するには情報不足)
+#
+# 【height の扱い】
+#   - 壁厚ベースの仮値を使用 (隣接壁の thickness の平均)
+#   - 実際の開口部高さは図面情報だけでは判定困難なため暫定
+#
+# この推定は暫定的なもの。高精度化は Phase 8B 以降で行う。
+# ═══════════════════════════════════════════════════════════
+
+
+def extract_openings(walls: list[dict]) -> list[dict]:
+    """
+    壁候補間のギャップから開口部候補を推定する。
+
+    壁マージ後の壁リストを入力として、同一直線上の壁間に
+    MIN_OPENING_WIDTH_MM 〜 MAX_OPENING_WIDTH_MM のギャップがあれば
+    開口部候補として返す。
+
+    返り値は ExtractedOpening の shape に合致する dict のリスト。
+    座標はすべて mm 単位。
+    """
+    if not walls:
+        return []
+
+    h_walls = [w for w in walls if _is_horizontal(w)]
+    v_walls = [w for w in walls if not _is_horizontal(w)]
+
+    openings: list[dict] = []
+
+    # 水平壁のギャップから開口部を検出
+    openings += _find_gaps_on_axis(h_walls, axis="h")
+
+    # 垂直壁のギャップから開口部を検出
+    openings += _find_gaps_on_axis(v_walls, axis="v")
+
+    # id を振る
+    for i, op in enumerate(openings):
+        op["id"] = f"opening-{i}"
+
+    # デバッグログ
+    type_counts: dict[str, int] = {}
+    for op in openings:
+        t = op["type"]
+        type_counts[t] = type_counts.get(t, 0) + 1
+    print(
+        f"[opening-detect] total={len(openings)}, types={type_counts}",
+        file=sys.stderr,
+    )
+
+    return openings
+
+
+def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
+    """
+    同一軸の壁グループ内でギャップを検出し、開口部候補を返す。
+
+    axis="h": 水平壁。Y 座標が近いものをグループ化し、X 方向のギャップを検出
+    axis="v": 垂直壁。X 座標が近いものをグループ化し、Y 方向のギャップを検出
+    """
+    if not walls:
+        return []
+
+    # 同一直線グループに分ける
+    if axis == "h":
+        walls_sorted = sorted(walls, key=lambda w: (w["startY"], w["startX"]))
+    else:
+        walls_sorted = sorted(walls, key=lambda w: (w["startX"], w["startY"]))
+
+    groups: list[list[dict]] = []
+    current_group: list[dict] = [walls_sorted[0]]
+
+    for wall in walls_sorted[1:]:
+        prev = current_group[0]
+        if axis == "h":
+            same_line = abs(wall["startY"] - prev["startY"]) <= OPENING_COLLINEAR_TOLERANCE_MM
+        else:
+            same_line = abs(wall["startX"] - prev["startX"]) <= OPENING_COLLINEAR_TOLERANCE_MM
+
+        if same_line:
+            current_group.append(wall)
+        else:
+            groups.append(current_group)
+            current_group = [wall]
+    groups.append(current_group)
+
+    # 各グループ内で隣接壁間のギャップを開口部候補にする
+    openings: list[dict] = []
+    for group in groups:
+        if len(group) < 2:
+            continue
+
+        # 主軸方向でソート
+        if axis == "h":
+            group_sorted = sorted(group, key=lambda w: w["startX"])
+        else:
+            group_sorted = sorted(group, key=lambda w: w["startY"])
+
+        for j in range(len(group_sorted) - 1):
+            wall_a = group_sorted[j]
+            wall_b = group_sorted[j + 1]
+
+            if axis == "h":
+                gap_start = wall_a["endX"]
+                gap_end = wall_b["startX"]
+                perp_coord = (wall_a["startY"] + wall_b["startY"]) / 2
+            else:
+                gap_start = wall_a["endY"]
+                gap_end = wall_b["startY"]
+                perp_coord = (wall_a["startX"] + wall_b["startX"]) / 2
+
+            gap_width = gap_end - gap_start
+
+            # ギャップ幅が開口部として妥当な範囲か
+            if gap_width < MIN_OPENING_WIDTH_MM or gap_width > MAX_OPENING_WIDTH_MM:
+                continue
+
+            # 開口部候補を生成
+            gap_center = (gap_start + gap_end) / 2
+            # height は隣接壁の thickness の平均を仮値として使用
+            avg_thickness = (wall_a["thickness"] + wall_b["thickness"]) / 2
+
+            # type の分類（暫定）
+            if gap_width >= DOOR_THRESHOLD_MM:
+                opening_type = "door"
+            else:
+                opening_type = "unknown"
+
+            if axis == "h":
+                center_x = round(gap_center, 1)
+                center_y = round(perp_coord, 1)
+            else:
+                center_x = round(perp_coord, 1)
+                center_y = round(gap_center, 1)
+
+            # wallId: 隣接する 2 壁のうち前方の壁を紐づける
+            wall_id = wall_a.get("id")
+
+            openings.append({
+                "id": "",  # 後で振り直す
+                "type": opening_type,
+                "centerX": center_x,
+                "centerY": center_y,
+                "width": round(gap_width, 1),
+                "height": round(avg_thickness, 1),
+                "wallId": wall_id,
+                "confidence": OPENING_CONFIDENCE,
+            })
+
+    return openings
+
+
 def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0) -> dict:
     """1ページ分の最小抽出データを返す。"""
     page = doc[page_index]
@@ -543,6 +728,9 @@ def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0
 
     # --- 壁候補の抽出 ---
     walls = extract_walls(page)
+
+    # --- 開口部候補の推定（壁候補のギャップベース） ---
+    openings = extract_openings(walls)
 
     # --- テキスト抽出（取れるものだけ） ---
     text_blocks = page.get_text("blocks")  # (x0, y0, x1, y1, text, block_no, block_type)
@@ -574,7 +762,7 @@ def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0
     return {
         "floorLabel": file_entry["floorLabel"],
         "walls": walls,
-        "openings": [],  # Phase 8A 後半以降: 開口部を推定する
+        "openings": openings,
         "rooms": rooms,
         "source": {
             "fileId": file_entry["fileId"],
@@ -593,6 +781,7 @@ def process_pipeline(pipeline_input: dict) -> dict:
     files = pipeline_input["files"]
     floors = []
     total_walls = 0
+    total_openings = 0
     total_rooms = 0
 
     for file_entry in files:
@@ -643,6 +832,7 @@ def process_pipeline(pipeline_input: dict) -> dict:
             floor_data = extract_floor_data(file_entry, doc, page_index=0)
             floors.append(floor_data)
             total_walls += len(floor_data["walls"])
+            total_openings += len(floor_data["openings"])
             total_rooms += len(floor_data["rooms"])
 
         doc.close()
@@ -666,7 +856,7 @@ def process_pipeline(pipeline_input: dict) -> dict:
         "stats": {
             "durationMs": duration_ms,
             "totalWalls": total_walls,
-            "totalOpenings": 0,  # Phase 8A 後半以降で実装
+            "totalOpenings": total_openings,
             "totalRooms": total_rooms,
         },
     }
