@@ -67,7 +67,10 @@ fixture 再生成:
 python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 ```
 
-### 7. 6 API エンドポイント (既存)
+### 7. 既存の 6 API 契約 + Phase 8A の internal endpoint
+
+#### 既存の 6 API 契約
+
 | エンドポイント | 用途 |
 |---|---|
 | `POST /api/plans/upload` | PDF アップロード |
@@ -75,7 +78,13 @@ python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 | `GET /api/jobs/[jobId]` | ジョブ状態取得 |
 | `GET /api/jobs/[jobId]/artifacts/[format]` | 成果物取得 |
 | `GET /api/jobs/[jobId]/quantities` | 数量表取得 |
-| `POST /api/internal/pipeline/run` | パイプライン実行 (実験用) |
+| `POST /api/leads` | リード送信 |
+
+#### Phase 8A の実験用 internal endpoint
+
+| エンドポイント | 用途 |
+|---|---|
+| `POST /api/internal/pipeline/run` | パイプライン実行（実験用。既存 6 API 契約には含めない） |
 
 ---
 

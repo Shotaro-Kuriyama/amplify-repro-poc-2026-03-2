@@ -39,6 +39,7 @@
 - fixture ベース再現テスト (28 テスト, 3 fixture PDF)
 - `type: "door" | "window" | "unknown"` の分類
 - door / window の重複回避
+- `POST /api/internal/pipeline/run` は Phase 8A 検証用の internal endpoint であり、既存の 6 API 契約とは別枠
 
 ### 未完了
 - 斜め壁・曲線壁の検出
@@ -69,13 +70,17 @@ python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 
 ## 絶対に壊してはいけないもの
 
-1. **6 API エンドポイント** の契約 (URL / リクエスト / レスポンス形式)
+1. **既存の 6 API 契約** の形式 (URL / リクエスト / レスポンス形式)
    - `POST /api/plans/upload`
    - `POST /api/jobs`
    - `GET /api/jobs/[jobId]`
    - `GET /api/jobs/[jobId]/artifacts/[format]`
    - `GET /api/jobs/[jobId]/quantities`
-   - `POST /api/internal/pipeline/run`
+   - `POST /api/leads`
+
+   ※ これとは別に、Phase 8A の実験用 endpoint として  
+   `POST /api/internal/pipeline/run` がある。  
+   これは既存 6 API 契約には含めず、独立した内部用 endpoint として扱う。
 
 2. **28 テスト** が全て合格する状態
 
