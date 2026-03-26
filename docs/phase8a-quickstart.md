@@ -106,6 +106,16 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
           "height": 5.0,
           "wallId": "wall-1",
           "confidence": 0.4
+        },
+        {
+          "id": "opening-1",
+          "type": "door",
+          "centerX": 53.0,
+          "centerY": 180.5,
+          "width": 18.0,
+          "height": 5.0,
+          "wallId": "wall-7",
+          "confidence": 0.5
         }
       ],
       "rooms": [...],
@@ -127,7 +137,7 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
   "stats": {
     "durationMs": 15,
     "totalWalls": 20,
-    "totalOpenings": 1,
+    "totalOpenings": 9,
     "totalRooms": 10
   }
 }
@@ -163,25 +173,34 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 
 ### openings に関する補足
 
-- 壁マージ後に残るギャップから開口部候補を暫定ルールベースで推定している
-- **精度は暫定**。壁間のギャップ幅のみで判定しており、ドア記号や窓枠の認識は行っていない
-- 対象: 水平壁・垂直壁間のギャップのみ。斜め壁は対象外
-- ギャップ幅の条件: 8mm (paper mm) 〜 40mm (paper mm)
-  - 1:50 スケールで 400mm 〜 2000mm 実寸相当
-- type 分類（暫定）:
-  - gap >= 14mm (paper mm) → `"door"` (1:50 で 700mm 実寸 — 一般的なドア幅)
-  - gap < 14mm → `"unknown"` (窓と断定するには情報不足)
+- **2 つの検出ソース** を組み合わせて開口部候補を推定している（どちらも暫定ルールベース）:
+  1. **gap ベース**: 壁マージ後のギャップから推定
+  2. **arc ベース**: drawing の cubic bezier (curve) からドア円弧を検出
+- **精度は暫定**。高精度なドア記号認識や窓枠検出は行っていない
+- gap ベースの条件:
+  - 対象: 水平壁・垂直壁間のギャップのみ。斜め壁は対象外
+  - ギャップ幅: 8mm 〜 40mm (paper mm, 1:50 で 400mm〜2000mm 実寸)
+  - gap >= 14mm → `"door"` 寄り、それ未満 → `"unknown"`
+- arc ベースの条件:
+  - bounding box がほぼ正方形 (aspect 0.7〜1.4) の quarter-circle 候補を検出
+  - 半径 8mm〜30mm (paper mm) のアークをドア円弧とみなす
+  - arc 端点が壁線の 5mm 以内にある場合のみ採用
+  - 既存の gap opening の近くに arc があれば → `"door"` + confidence 0.6
+  - gap がなくても壁近くに arc があれば → 新規 door 候補 (confidence 0.5)
 - `height` は隣接壁の thickness 平均値を仮値として使用（実際の開口部高さではない）
-- `wallId` は前方の隣接壁の id を紐づけている
-- `confidence` は固定値 0.4（壁候補より低い）
-- PDF によっては壁が全てフルスパンで描画されており、ギャップがないため `openings` が 0 件のままの場合もある
+- `wallId` は隣接壁の id を紐づけている
+- `confidence` の差別化:
+  - arc + gap の両根拠 → 0.6
+  - arc のみ → 0.5
+  - gap のみ → 0.4
+- PDF によっては curve 情報がなく、ギャップもないため `openings` が 0 件のままの場合もある
 
 ## 現時点の制約（まだダミー・未実装の部分）
 
 | 項目 | 状態 |
 |---|---|
 | `walls` | drawing 情報から暫定ルールで抽出 + 重複整理・マージ済み（精度は低い。curve/arc は未対応） |
-| `openings` | 壁間ギャップから暫定ルールで推定（精度は低い。円弧ドア・窓枠認識は未対応） |
+| `openings` | gap + arc ベースで暫定推定（精度は低い。窓枠認識は未対応） |
 | `rooms` | テキストブロックから簡易抽出（精度は低い） |
 | `floorLabel` | サーバー側で `1F, 2F...` と自動採番（暫定。フロントの設定とは未連携） |
 | `artifacts` | `structured_json` のみ、インラインで返却（ファイル書き出しなし） |

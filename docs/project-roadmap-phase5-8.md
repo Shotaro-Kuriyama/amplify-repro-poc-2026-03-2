@@ -424,12 +424,33 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
 4. **IFC 生成にはまだ進んでいない**
    - まずは壁 + 開口部の候補データを安定させてから着手する
 
+### Phase 8A 継続（円弧ベースのドア推定強化）で完了したこと
+
+1. **cubic bezier からのドア円弧検出** ✓
+   - `get_drawings()` の "c" (cubic bezier) アイテムから quarter-circle パターンを検出
+   - bounding box のアスペクト比 (0.7〜1.4) と半径 (8〜30mm paper) でフィルタ
+   - line_only PDF で 8 本の door arc を検出
+
+2. **既存 opening との突き合わせ** ✓
+   - arc 端点が opening 近傍 (20mm 以内) にあれば → type="door", confidence 0.6 に引き上げ
+   - arc のみで gap がなくても壁線近く (5mm 以内) なら → 新規 door 候補 (confidence 0.5)
+   - 効果: line_only PDF で 1 opening → 9 openings (1 gap + 8 arc-based)
+
+3. **confidence の差別化** ✓
+   - arc + gap 両根拠 → 0.6
+   - arc のみ → 0.5
+   - gap のみ → 0.4
+
+4. **まだ高精度なドア記号認識ではない**
+   - quarter-circle の簡易判定のみ。複雑なドア記号は未対応
+   - 窓枠認識は未実装
+   - IFC 生成にはまだ進んでいない
+
 ### 次のステップ（Phase 8B に向けて）
 
-1. **開口部推定の精度向上**
-   - 円弧パターンからのドア検出
-   - 窓枠形状の認識
-   - 斜め壁からの opening 推定
+1. **窓枠形状の認識**
+   - rect パターンから窓候補を推定
+   - `type: "window"` の判定精度向上
 
 2. **floorLabel の正式接続**
    - `createAmplifyJob` の request 拡張を検討
@@ -445,5 +466,5 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
 - GPU 前提の基盤整備
 - 大規模キューシステム導入
 - 本番運用前提の全自動化
-- 高精度な開口部検出（円弧ドア記号・窓枠認識はまだ Phase 8B 以降）
+- 高精度なドア記号認識（複雑なドアシンボル・窓枠認識は Phase 8B 以降）
 - IFC 本生成（構造化 JSON が先）

@@ -11,11 +11,13 @@ Phase 8A: 最小 PDF 処理スクリプト
 - ページ数、ページサイズの取得
 - テキスト抽出（取れれば）
 - drawing 情報から線分を抽出し、最小ルールで壁候補を推定
-- 壁候補間のギャップから開口部候補を暫定推定（Phase 8A 暫定）
+- 壁候補間のギャップ + 円弧パターンから開口部候補を暫定推定（Phase 8A 暫定）
 
 使用ライブラリ: PyMuPDF (fitz)
   pip install PyMuPDF
 """
+
+from __future__ import annotations
 
 import json
 import math
@@ -60,7 +62,8 @@ except ImportError:
 # 【抽出対象】
 #   - "l" (line): 直線 → そのまま線分として扱う
 #   - "re" (rect): 矩形 → 4辺に分解して線分として扱う
-#   ※ "c" (curve/bezier), "qu" (quad) 等は今回は無視
+#   - "c" (curve/bezier): 壁候補には使わないが、ドア円弧の検出に使用
+#   ※ "qu" (quad) 等は今回は無視
 #
 # 【壁候補の判定ルール（暫定）】
 #   - 長さが MIN_WALL_LENGTH_MM (50mm) 以上
@@ -133,6 +136,28 @@ DOOR_THRESHOLD_MM = 14.0      # gap >= この値 → "door" 寄り (paper mm)
 OPENING_COLLINEAR_TOLERANCE_MM = 1.5  # 開口部検出用の同一直線判定 (壁マージ後なので厳しめ)
 DEFAULT_OPENING_HEIGHT_MM = 5.0  # opening の height 仮値 (壁厚ベース)
 OPENING_CONFIDENCE = 0.4      # 開口部の暫定 confidence (壁より低い)
+
+# ── 円弧ベースのドア推定閾値（Phase 8A 暫定） ──
+#
+# 【推定方針】
+# PDF の drawing 情報にある cubic bezier curve ("c") のうち、
+# ドアの開き記号に見える quarter-circle パターンを拾い、
+# 既存の gap-based opening と突き合わせる。
+# arc が opening の近くにあれば "door" 判定の根拠を強化する。
+# arc のみで gap がなくても、壁線近くの arc は新規 door 候補として追加する。
+#
+# これは暫定ルール。完全なドア記号認識は Phase 8B 以降で行う。
+#
+MIN_ARC_RADIUS_MM = 8.0       # door arc 候補の最小半径 (paper mm)
+                                # (1:50 で 400mm 実寸。小さすぎるアークを除外)
+MAX_ARC_RADIUS_MM = 30.0      # door arc 候補の最大半径 (paper mm)
+                                # (1:50 で 1500mm 実寸。大きすぎるアークを除外)
+ARC_ASPECT_MIN = 0.7          # quarter-circle 判定の最小アスペクト比
+ARC_ASPECT_MAX = 1.4          # quarter-circle 判定の最大アスペクト比
+ARC_MATCH_DISTANCE_MM = 20.0  # arc と opening を結びつける最大距離 (mm)
+ARC_WALL_DISTANCE_MM = 5.0    # arc 端点が壁線上にあると判定する距離 (mm)
+ARC_DOOR_CONFIDENCE = 0.6     # arc 根拠ありの door confidence
+ARC_ONLY_DOOR_CONFIDENCE = 0.5  # arc のみ (gap なし) の door confidence
 
 
 def _extract_line_segments(page) -> list[dict]:
@@ -602,17 +627,9 @@ def extract_openings(walls: list[dict]) -> list[dict]:
     # 垂直壁のギャップから開口部を検出
     openings += _find_gaps_on_axis(v_walls, axis="v")
 
-    # id を振る
-    for i, op in enumerate(openings):
-        op["id"] = f"opening-{i}"
-
-    # デバッグログ
-    type_counts: dict[str, int] = {}
-    for op in openings:
-        t = op["type"]
-        type_counts[t] = type_counts.get(t, 0) + 1
+    # デバッグログ (gap-based のみ。arc 強化は後段で行う)
     print(
-        f"[opening-detect] total={len(openings)}, types={type_counts}",
+        f"[opening-detect] gap_based={len(openings)}",
         file=sys.stderr,
     )
 
@@ -718,6 +735,225 @@ def _find_gaps_on_axis(walls: list[dict], axis: str) -> list[dict]:
     return openings
 
 
+# ═══════════════════════════════════════════════════════════
+# 円弧ベースのドア推定（Phase 8A 暫定 — cubic bezier の最小利用）
+#
+# 【方針】
+# PyMuPDF の get_drawings() が返す "c" (cubic bezier) アイテムのうち、
+# ドアの開き記号に見える quarter-circle パターンを検出する。
+#
+# 【ドア円弧の特徴（建築図面）】
+#   - 90° の扇形（quarter circle）として描画される
+#   - 制御点の bounding box が正方形に近い (aspect ≈ 1.0)
+#   - 半径がドア幅に対応（一般的なドア: 700〜900mm → 1:50 で 14〜18mm paper）
+#   - 一方の端点がドアヒンジ（壁線上に接触）
+#
+# 【cubic bezier → quarter circle の判定】
+#   PDF では円弧を cubic bezier で近似する。
+#   quarter circle の場合、4 制御点の bounding box がほぼ正方形になる。
+#   この性質を利用して簡易判定する（厳密な曲率計算は行わない）。
+#
+# この推定は暫定的なもの。高精度化は Phase 8B 以降で行う。
+# ═══════════════════════════════════════════════════════════
+
+
+def _extract_door_arcs(page) -> list[dict]:
+    """
+    drawing 情報からドア開き円弧の候補を抽出する。
+
+    cubic bezier ("c") のうち、quarter-circle に近いものを
+    door arc 候補として返す。
+
+    返り値:
+      [{"start": (x, y), "end": (x, y), "center": (x, y), "radius": float}, ...]
+      座標はすべて mm 単位。
+    """
+    drawings = page.get_drawings()
+    arcs: list[dict] = []
+
+    for d in drawings:
+        for item in d["items"]:
+            if item[0] != "c":
+                continue
+
+            # cubic bezier: item = ("c", p1, p2, p3, p4)
+            # p1=start, p2=ctrl1, p3=ctrl2, p4=end
+            p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
+
+            # mm に変換
+            x1, y1 = p1.x * PT_TO_MM, p1.y * PT_TO_MM
+            cx1, cy1 = p2.x * PT_TO_MM, p2.y * PT_TO_MM
+            cx2, cy2 = p3.x * PT_TO_MM, p3.y * PT_TO_MM
+            x4, y4 = p4.x * PT_TO_MM, p4.y * PT_TO_MM
+
+            # bounding box of all 4 control points
+            all_x = [x1, cx1, cx2, x4]
+            all_y = [y1, cy1, cy2, y4]
+            bbox_w = max(all_x) - min(all_x)
+            bbox_h = max(all_y) - min(all_y)
+
+            if bbox_w < 1 or bbox_h < 1:
+                continue  # 極小の曲線は無視
+
+            # quarter-circle 判定: bounding box がほぼ正方形
+            aspect = bbox_w / bbox_h
+            if aspect < ARC_ASPECT_MIN or aspect > ARC_ASPECT_MAX:
+                continue
+
+            # 推定半径: chord / sqrt(2) (quarter circle の chord と半径の関係)
+            chord = math.sqrt((x4 - x1) ** 2 + (y4 - y1) ** 2)
+            radius = chord / math.sqrt(2)
+
+            if radius < MIN_ARC_RADIUS_MM or radius > MAX_ARC_RADIUS_MM:
+                continue
+
+            # bounding box の中心
+            center_x = (min(all_x) + max(all_x)) / 2
+            center_y = (min(all_y) + max(all_y)) / 2
+
+            arcs.append({
+                "start": (round(x1, 1), round(y1, 1)),
+                "end": (round(x4, 1), round(y4, 1)),
+                "center": (round(center_x, 1), round(center_y, 1)),
+                "radius": round(radius, 1),
+            })
+
+    return arcs
+
+
+def _enhance_openings_with_arcs(
+    openings: list[dict],
+    arcs: list[dict],
+    walls: list[dict],
+) -> list[dict]:
+    """
+    arc 候補を使って opening 候補を強化する。
+
+    1. 既存 opening の近くに arc がある → type="door", confidence を引き上げ
+    2. arc があるが nearby opening がない → 壁の近くなら新規 door 候補を追加
+
+    返り値は更新済みの openings リスト。
+    """
+    if not arcs:
+        return openings
+
+    # arc ごとにマッチ済みかどうかを追跡
+    arc_matched = [False] * len(arcs)
+
+    # Step 1: 既存 opening と arc を突き合わせる
+    for opening in openings:
+        ox, oy = opening["centerX"], opening["centerY"]
+        best_arc_idx = -1
+        best_dist = float("inf")
+
+        for ai, arc in enumerate(arcs):
+            # arc の start/end 両方の距離を見て、近い方を使う
+            for pt in [arc["start"], arc["end"]]:
+                dist = math.sqrt((ox - pt[0]) ** 2 + (oy - pt[1]) ** 2)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_arc_idx = ai
+
+            # arc center との距離も見る
+            cx, cy = arc["center"]
+            dist_c = math.sqrt((ox - cx) ** 2 + (oy - cy) ** 2)
+            if dist_c < best_dist:
+                best_dist = dist_c
+                best_arc_idx = ai
+
+        if best_dist <= ARC_MATCH_DISTANCE_MM and best_arc_idx >= 0:
+            # arc と結びつく → door に寄せて confidence を上げる
+            opening["type"] = "door"
+            opening["confidence"] = ARC_DOOR_CONFIDENCE
+            opening["_arc_matched"] = True  # 内部フラグ
+            arc_matched[best_arc_idx] = True
+
+    # Step 2: マッチしなかった arc から新規 door 候補を生成
+    for ai, arc in enumerate(arcs):
+        if arc_matched[ai]:
+            continue
+
+        # arc の端点が壁線の近くにあるかチェック
+        wall_id = _find_nearest_wall_for_arc(arc, walls)
+        if wall_id is None:
+            continue  # 壁の近くにない arc は無視
+
+        # 新規 door 候補を生成
+        # ドアの中心: arc の start と end の中間点
+        sx, sy = arc["start"]
+        ex, ey = arc["end"]
+        center_x = round((sx + ex) / 2, 1)
+        center_y = round((sy + ey) / 2, 1)
+
+        # ドア幅: arc の radius（ドアの開き幅 ≈ ドアリーフ幅）
+        door_width = round(arc["radius"], 1)
+
+        # 近傍壁の thickness を height 仮値に
+        wall = next((w for w in walls if w.get("id") == wall_id), None)
+        height = round(wall["thickness"], 1) if wall else DEFAULT_OPENING_HEIGHT_MM
+
+        openings.append({
+            "id": "",  # 後で振り直す
+            "type": "door",
+            "centerX": center_x,
+            "centerY": center_y,
+            "width": door_width,
+            "height": height,
+            "wallId": wall_id,
+            "confidence": ARC_ONLY_DOOR_CONFIDENCE,
+            "_arc_matched": True,
+        })
+
+    return openings
+
+
+def _find_nearest_wall_for_arc(arc: dict, walls: list[dict]) -> str | None:
+    """
+    arc の端点が壁線の近くにあるかチェックし、最も近い壁の id を返す。
+    壁線上にない場合は None を返す。
+    """
+    best_wall_id = None
+    best_dist = float("inf")
+
+    for wall in walls:
+        wx1, wy1 = wall["startX"], wall["startY"]
+        wx2, wy2 = wall["endX"], wall["endY"]
+
+        # arc の start/end それぞれと壁線の距離をチェック
+        for pt in [arc["start"], arc["end"]]:
+            px, py = pt
+            dist = _point_to_segment_distance(px, py, wx1, wy1, wx2, wy2)
+            if dist < best_dist:
+                best_dist = dist
+                best_wall_id = wall.get("id")
+
+    if best_dist <= ARC_WALL_DISTANCE_MM:
+        return best_wall_id
+    return None
+
+
+def _point_to_segment_distance(
+    px: float, py: float,
+    x1: float, y1: float,
+    x2: float, y2: float,
+) -> float:
+    """点 (px, py) と線分 (x1,y1)-(x2,y2) の最短距離を返す。"""
+    dx = x2 - x1
+    dy = y2 - y1
+    length_sq = dx * dx + dy * dy
+
+    if length_sq == 0:
+        # 線分が点の場合
+        return math.sqrt((px - x1) ** 2 + (py - y1) ** 2)
+
+    # 線分上の最近接点のパラメータ t (0..1)
+    t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / length_sq))
+    nearest_x = x1 + t * dx
+    nearest_y = y1 + t * dy
+
+    return math.sqrt((px - nearest_x) ** 2 + (py - nearest_y) ** 2)
+
+
 def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0) -> dict:
     """1ページ分の最小抽出データを返す。"""
     page = doc[page_index]
@@ -729,8 +965,29 @@ def extract_floor_data(file_entry: dict, doc: fitz.Document, page_index: int = 0
     # --- 壁候補の抽出 ---
     walls = extract_walls(page)
 
-    # --- 開口部候補の推定（壁候補のギャップベース） ---
+    # --- 開口部候補の推定（壁候補のギャップベース + 円弧ベース） ---
     openings = extract_openings(walls)
+
+    # --- 円弧ベースのドア推定強化 ---
+    door_arcs = _extract_door_arcs(page)
+    openings = _enhance_openings_with_arcs(openings, door_arcs, walls)
+
+    # id を振り直し、内部フラグを除去
+    arc_confirmed = sum(1 for op in openings if op.get("_arc_matched"))
+    for i, op in enumerate(openings):
+        op["id"] = f"opening-{i}"
+        op.pop("_arc_matched", None)
+
+    # デバッグログ
+    type_counts: dict[str, int] = {}
+    for op in openings:
+        t = op["type"]
+        type_counts[t] = type_counts.get(t, 0) + 1
+    print(
+        f"[opening-arc] arcs={len(door_arcs)}, arc_confirmed_doors={arc_confirmed}, "
+        f"total_openings={len(openings)}, types={type_counts}",
+        file=sys.stderr,
+    )
 
     # --- テキスト抽出（取れるものだけ） ---
     text_blocks = page.get_text("blocks")  # (x0, y0, x1, y1, text, block_no, block_type)
