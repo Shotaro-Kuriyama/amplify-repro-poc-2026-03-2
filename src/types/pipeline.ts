@@ -15,7 +15,20 @@
 // パイプライン入力 — Route Handler → Worker に渡すもの
 // ═══════════════════════════════════════════════════════════
 
-/** 1枚の PDF を処理するための最小入力 */
+/**
+ * 1枚の PDF を処理するための最小入力。
+ *
+ * Phase 8A で Route Handler（または将来の API Server）が Worker に渡すデータ。
+ *
+ * 現行 API との接続状況:
+ * - jobId: StoredJob.jobId から取得可能 ✓
+ * - files[].fileId: StoredJob.fileIds から取得可能 ✓
+ * - files[].filePath: StoredFile.filePath から取得可能 ✓
+ * - files[].originalName: StoredFile.originalName から取得可能 ✓
+ * - files[].floorLabel: 現在サーバー側に未保持（TODO: Phase 8A で接続）
+ * - settings.scale: StoredJob.scale から取得可能 ✓
+ * - settings.floorHeight: StoredJob.floorHeight から取得可能 ✓
+ */
 export interface PipelineInput {
   /** ジョブ ID */
   jobId: string;
@@ -29,11 +42,30 @@ export interface PipelineInput {
 export interface PipelineFileEntry {
   /** ファイル ID */
   fileId: string;
-  /** ストレージ上のパス（または将来的には URL） */
+  /**
+   * ストレージ上のパス（または将来的には URL）。
+   * 現在は LocalFileStorage が保存したパスを StoredFile.filePath から取得できる。
+   */
   filePath: string;
   /** 元のファイル名 */
   originalName: string;
-  /** 階数ラベル（例: "1F", "B1"） */
+  /**
+   * 階数ラベル（例: "1F", "B1"）。
+   *
+   * TODO(Phase 8A): 現在この情報はフロントエンド専用（useFileUpload.ts の UploadedFile.label）で、
+   * サーバー側 API には渡されていない。
+   *
+   * 現行の API 契約:
+   * - uploadPlans: ファイルメタデータのみ返却（階数情報なし）
+   * - createAmplifyJob: fileIds[] と settings のみ受付（階数情報なし）
+   *
+   * Phase 8A で PipelineInput を組み立てるには、以下のいずれかが必要:
+   * 案1: createAmplifyJob の request に fileIds と対応する floorLabel を追加する
+   * 案2: 別途 floorLabel を設定する API を追加する
+   * 案3: サーバー側でファイル順序から自動推定する（startFloor + index）
+   *
+   * 現時点では案1が最もシンプル。ただし API 契約変更になるため、Phase 8A 着手時に判断する。
+   */
   floorLabel: string;
 }
 

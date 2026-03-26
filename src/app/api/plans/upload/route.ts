@@ -25,6 +25,17 @@ export async function POST(request: NextRequest) {
       return errorResponse(400, "VALIDATION_ERROR", "ファイルが送信されていません");
     }
 
+    // 最小の PDF 検証: 拡張子または MIME type で判定
+    // フロントエンド（DropZone）でも制限しているが、サーバー側でも最低限チェックする
+    for (const entry of entries) {
+      const file = entry as File;
+      const isPdfMime = file.type === "application/pdf";
+      const isPdfExt = file.name.toLowerCase().endsWith(".pdf");
+      if (!isPdfMime && !isPdfExt) {
+        return errorResponse(400, "UNSUPPORTED_FILE_TYPE", `PDF ファイルのみ対応しています: ${file.name}`);
+      }
+    }
+
     const now = new Date().toISOString();
     const files = await Promise.all(
       entries.map(async (entry, i) => {

@@ -19,7 +19,7 @@ README やコード上のコメントとは別に、**開発判断の拠り所**
 
 ## 2. 現在地
 
-**Phase 7.5 の土台整理が完了（Phase 8A 着手前）**（2026-03 時点）
+**Phase 7.5 前半（土台整理・インターフェース導入）が完了、後半（DB 永続化）は未着手**（2026-03 時点）
 
 現時点で整っているもの:
 
@@ -40,16 +40,22 @@ real モード: ブラウザ → real.ts (fetch) → Route Handlers (/api/*) →
 mock モード: ブラウザ → mock.ts（直接呼び出し）
 ```
 
-Phase 7.5 で追加整理したもの:
+Phase 7.5 前半で整理したもの（土台・インターフェース）:
 
-- **実ファイル保持**: アップロード PDF をローカルディスクに保存する仕組み（`FileStorage` 抽象）
-- **永続化境界の整理**: `FileRepository` / `JobRepository` / `LeadRepository` インターフェースの導入
+- **実ファイル保持**: アップロード PDF をローカルディスクに保存する仕組み（`FileStorage` 抽象 + `LocalFileStorage`）
+- **永続化境界の整理**: `FileRepository` / `JobRepository` / `LeadRepository` インターフェースの導入（**実装は InMemory のまま**）
 - **Phase 8A 型定義**: パイプラインの入力・中間表現・出力の型（`src/types/pipeline.ts`）
 - **Worker 分離境界**: 各 Route Handler に「残る責務」と「将来移す責務」のコメントを追加
 
+Phase 7.5 でまだ未着手のもの:
+
+- **DB 永続化**: job 状態の SQLite / PostgreSQL 保存（インターフェースは定義済み、実装は未着手）
+- **ステータス遷移の DB 保証**: DB レベルでのジョブ状態整合性チェック
+- **floorLabel のサーバー側保持**: フロント → サーバーへの階数情報の受け渡し（Phase 8A で接続予定）
+
 補足:
 - Phase 7 のモックとしての動作は維持されている
-- 永続化の実体（SQLite 等）はまだ導入していない（インターフェースのみ）
+- 永続化は「差し替え可能なインターフェース」まで。実体の導入は Phase 8A の処理要件に応じて判断する
 - 次の論点は Phase 8A（ルールベース PDF 処理の技術検証）
 
 ---
@@ -302,15 +308,16 @@ Phase 8    PDF→BIM の技術検証
 
 ## 10. 次の最小アクション
 
-Phase 7.5 の土台整理が完了した今、次に取り組むべきは **Phase 8A** です。
+Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは **Phase 8A** です。
+（Phase 7.5 後半の DB 永続化は、Phase 8A の処理要件に応じて判断する）
 
-### Phase 7.5 で完了したこと
+### Phase 7.5 前半で完了したこと
 
 1. **アップロード PDF の実ファイル保存** ✓
    - `FileStorage` インターフェースと `LocalFileStorage` を導入
    - upload Route Handler がファイル実体を `data/uploads/` に保存するようになった
 
-2. **永続化境界の整理** ✓
+2. **永続化境界の整理** ✓（インターフェースのみ。DB 実装は未着手）
    - `FileRepository` / `JobRepository` / `LeadRepository` インターフェースを定義
    - 現在は InMemory 実装、将来 SQLite / PostgreSQL に差し替え可能
 
@@ -318,9 +325,10 @@ Phase 7.5 の土台整理が完了した今、次に取り組むべきは **Phas
    - 各 Route Handler に責務境界コメントを追加
    - 「何が Route Handler に残り、何が Worker に移るか」が明確になった
 
-4. **Phase 8A の最小入力・最小出力の定義** ✓
+4. **Phase 8A の最小入力・最小出力の定義** ✓（一部未接続あり）
    - `src/types/pipeline.ts` に型を定義
    - `PipelineInput` → `ExtractedFloorData` → `PipelineOutput` の流れを型で表現
+   - ただし `floorLabel` は現在フロントエンド専用で、サーバー側 API に未反映（Phase 8A で接続予定）
 
 ### 次のステップ（Phase 8A に向けて）
 
