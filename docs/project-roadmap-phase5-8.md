@@ -385,6 +385,24 @@ Phase 7.5 前半の土台整理が完了した今、次に取り組むべきは 
 4. **開口部・IFC 生成にはまだ進んでいない**
    - 壁候補の品質安定が先。開口部は壁が安定してから着手する
 
+### Phase 8A 継続（thickness 推定の改善）で完了したこと
+
+1. **rect 由来 thickness の信頼性判定** ✓
+   - rect 短辺 <= 20mm → 壁厚として信頼 (source = "rect")
+   - rect 短辺 > 20mm → 部屋寸法とみなし fallback (大きな矩形の誤った壁厚 150mm/160mm を排除)
+
+2. **thickness source の追跡と優先順位** ✓
+   - 内部処理で source ("rect" > "nearby_rect" > "line_stroke" > "fallback") を追跡
+   - dedup/merge 時に信頼度の高い thickness を優先して採用
+
+3. **fallback thickness の補完** ✓
+   - 同一ページの rect 由来 thickness の中央値で fallback wall を補完
+   - fallback デフォルト値を 150mm → 5mm (paper mm) に修正
+
+4. **まだ本格的な壁厚推定ではない**
+   - 平行線ペアからの壁厚推定は未実装
+   - 図面スケールを考慮した実寸変換は未実装
+
 ### 次のステップ（Phase 8B に向けて）
 
 1. **開口部の推定**

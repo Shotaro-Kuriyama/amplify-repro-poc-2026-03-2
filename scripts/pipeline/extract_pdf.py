@@ -67,10 +67,14 @@ except ImportError:
 #   - 水平または垂直に近い（水平/垂直からの角度差が MAX_ANGLE_DEV_DEG (5°) 以内）
 #   - ページ全体の背景矩形は除外する
 #
-# 【thickness の扱い】
-#   - line: PDF の stroke width を mm に変換。0 や未設定の場合は DEFAULT_THICKNESS_MM
-#   - rect: 短辺の長さを thickness として使う
-#   - いずれも暫定値。高精度な壁厚推定は Phase 8A 以降で行う
+# 【thickness の推定ルール（暫定）】
+#   優先順位: rect 短辺 > line stroke width > 近傍 rect 代表値 > fallback
+#   - rect: 短辺 <= MAX_RECT_THICKNESS_MM なら壁厚として信頼する
+#           短辺 > MAX_RECT_THICKNESS_MM なら部屋形状とみなし fallback
+#   - line: stroke width >= 1mm なら参考情報として使う (line_stroke)
+#           < 1mm なら fallback
+#   - refinement: fallback の wall は、同一ページの rect 由来厚みの中央値で補完する
+#   - それでも情報がなければ FALLBACK_THICKNESS_MM (5mm) を使う
 #
 # 【confidence の扱い】
 #   - 固定値 0.5（暫定）。長さや角度に応じた重み付けは将来対応
@@ -83,8 +87,26 @@ PT_TO_MM = 0.3528
 # 壁候補判定の閾値
 MIN_WALL_LENGTH_MM = 50.0    # これ以下の線分は壁候補にしない
 MAX_ANGLE_DEV_DEG = 5.0      # 水平/垂直からの許容角度差（度）
-DEFAULT_THICKNESS_MM = 150.0  # stroke width が不明な場合のデフォルト壁厚
 DEFAULT_CONFIDENCE = 0.5      # 暫定の固定 confidence
+
+# ── thickness 推定の閾値（暫定） ──
+#
+# 【推定方針 — Phase 8A 暫定】
+# thickness (壁厚) の推定ソースには優先順位がある:
+#   1. "rect" — 矩形の短辺。細長い矩形 (短辺 <= MAX_RECT_THICKNESS_MM) の場合のみ信頼する。
+#              大きな矩形の短辺は部屋寸法であり壁厚ではない。
+#   2. "line_stroke" — PDF の stroke width。描画上の線幅であり壁厚そのものではないが、
+#              太い線 = 太い壁 / 細い線 = 薄い壁 という傾向はあるため参考情報として使う。
+#   3. "nearby_rect" — 同一ページ内の rect 由来 thickness の代表値 (中央値) を借用。
+#   4. "fallback" — どの情報源もない場合のデフォルト値。
+#
+# これらは暫定ルール。高精度な壁厚推定は Phase 8B 以降で行う。
+#
+MAX_RECT_THICKNESS_MM = 20.0  # rect 短辺がこの値以下なら壁厚として信頼する (paper mm)
+                               # 超える場合は部屋/ゾーン形状とみなし壁厚として使わない
+                               # (1:50 で 20mm paper = 1000mm 実寸。壁としてありえない厚さ)
+FALLBACK_THICKNESS_MM = 5.0   # 全く手がかりがない場合のデフォルト壁厚 (paper mm)
+                               # (1:50 で 5mm paper = 250mm 実寸。一般的な RC 壁)
 
 # ── 重複除去・マージの閾値（暫定） ──
 # これらの値は暫定的なもの。PDF の解像度や図面縮尺によっては
@@ -104,6 +126,7 @@ def _extract_line_segments(page) -> list[dict]:
         "x2": float, "y2": float,  # 終点 (mm)
         "thickness_mm": float,     # 推定壁厚 (mm)
         "source_type": str,        # "line" or "rect"
+        "thickness_source": str,   # "rect" | "line_stroke" | "fallback"
       }
     """
     page_rect = page.rect
@@ -121,12 +144,21 @@ def _extract_line_segments(page) -> list[dict]:
                 # 直線
                 p1, p2 = item[1], item[2]
                 stroke_w = d.get("width") or 0
-                thickness_mm = stroke_w * PT_TO_MM if stroke_w > 0 else DEFAULT_THICKNESS_MM
+                stroke_mm = stroke_w * PT_TO_MM if stroke_w > 0 else 0
+                if stroke_mm >= 1.0:
+                    # stroke width がある程度太い → 描画上の太さとして参考にする
+                    thickness_mm = stroke_mm
+                    thickness_source = "line_stroke"
+                else:
+                    # stroke width が不明または極細 → 壁厚の手がかりなし
+                    thickness_mm = FALLBACK_THICKNESS_MM
+                    thickness_source = "fallback"
                 segments.append({
                     "x1": p1.x * PT_TO_MM, "y1": p1.y * PT_TO_MM,
                     "x2": p2.x * PT_TO_MM, "y2": p2.y * PT_TO_MM,
                     "thickness_mm": round(thickness_mm, 1),
                     "source_type": "line",
+                    "thickness_source": thickness_source,
                 })
 
             elif item_type == "re":
@@ -137,11 +169,20 @@ def _extract_line_segments(page) -> list[dict]:
                         and abs(r.height) > page_h_pt * 0.95):
                     continue
 
-                # 塗りつぶし矩形の場合、短辺を thickness として使う
+                # 短辺の長さ → 壁厚の候補
                 w_mm = abs(r.width) * PT_TO_MM
                 h_mm = abs(r.height) * PT_TO_MM
                 is_horizontal = w_mm >= h_mm
-                thickness_mm = h_mm if is_horizontal else w_mm
+                short_side_mm = h_mm if is_horizontal else w_mm
+
+                # 短辺が MAX_RECT_THICKNESS_MM 以下なら壁厚として信頼する
+                # 超える場合は大きな矩形（部屋/ゾーン形状）なので壁厚情報としては使わない
+                if short_side_mm <= MAX_RECT_THICKNESS_MM:
+                    thickness_mm = short_side_mm
+                    thickness_source = "rect"
+                else:
+                    thickness_mm = FALLBACK_THICKNESS_MM
+                    thickness_source = "fallback"
 
                 # 4辺を展開
                 x0, y0 = r.x0 * PT_TO_MM, r.y0 * PT_TO_MM
@@ -158,6 +199,7 @@ def _extract_line_segments(page) -> list[dict]:
                         "x2": ex2, "y2": ey2,
                         "thickness_mm": round(thickness_mm, 1),
                         "source_type": "rect",
+                        "thickness_source": thickness_source,
                     })
 
     return segments
@@ -186,8 +228,9 @@ def _extract_raw_walls(page) -> list[dict]:
     """
     drawing 情報から壁候補を抽出する（正規化・重複除去前の raw データ）。
 
-    返り値は ExtractedWall の shape に合致する dict のリスト。
-    座標・thickness はすべて mm 単位。id は仮のもの（後で振り直す）。
+    返り値は ExtractedWall の shape + 内部補助情報 を持つ dict のリスト。
+    座標・thickness はすべて mm 単位。
+    内部補助情報 (_thickness_source) は最終出力前に除去する。
     """
     segments = _extract_line_segments(page)
     walls = []
@@ -199,29 +242,102 @@ def _extract_raw_walls(page) -> list[dict]:
         if not _is_near_axis_aligned(seg["x1"], seg["y1"], seg["x2"], seg["y2"]):
             continue
 
-        # thickness: line の場合は stroke width を使うが、
-        # あまりに細い場合 (< 1mm) はデフォルト値にフォールバック
-        thickness = seg["thickness_mm"]
-        if thickness < 1.0:
-            thickness = DEFAULT_THICKNESS_MM
-
         walls.append({
             "startX": round(seg["x1"], 1),
             "startY": round(seg["y1"], 1),
             "endX": round(seg["x2"], 1),
             "endY": round(seg["y2"], 1),
-            "thickness": round(thickness, 1),
+            "thickness": round(seg["thickness_mm"], 1),
             "confidence": DEFAULT_CONFIDENCE,
+            # 内部用: thickness の推定ソース (最終出力前に除去)
+            "_thickness_source": seg["thickness_source"],
         })
 
     return walls
 
 
 # ═══════════════════════════════════════════════════════════
+# thickness の補完（Phase 8A 継続 — 暫定ルールベース）
+#
+# fallback のまま残っている wall の thickness を、
+# 同一ページ内の rect 由来情報で補完する。
+# ═══════════════════════════════════════════════════════════
+
+
+def _refine_thickness(walls: list[dict]) -> list[dict]:
+    """
+    fallback thickness を、同一ページ内の rect 由来厚みの代表値で補完する。
+
+    - rect 由来 (_thickness_source == "rect") の thickness 値を収集する
+    - その中央値を「このページの代表的な壁厚」として使う
+    - fallback の wall にこの代表値を割り当て、source を "nearby_rect" に更新する
+    - rect 由来の厚みが 1 つもなければ、FALLBACK_THICKNESS_MM のまま残す
+    """
+    # rect 由来の thickness を収集
+    rect_thicknesses = [
+        w["thickness"] for w in walls if w.get("_thickness_source") == "rect"
+    ]
+
+    if not rect_thicknesses:
+        # rect 由来の情報がない → 補完できないのでそのまま返す
+        return walls
+
+    # 代表値として中央値を採用
+    rect_thicknesses_sorted = sorted(rect_thicknesses)
+    n = len(rect_thicknesses_sorted)
+    if n % 2 == 1:
+        median_thickness = rect_thicknesses_sorted[n // 2]
+    else:
+        median_thickness = (rect_thicknesses_sorted[n // 2 - 1] + rect_thicknesses_sorted[n // 2]) / 2
+    median_thickness = round(median_thickness, 1)
+
+    # fallback の wall を補完
+    for w in walls:
+        if w.get("_thickness_source") == "fallback":
+            w["thickness"] = median_thickness
+            w["_thickness_source"] = "nearby_rect"
+
+    return walls
+
+
+# thickness source の信頼度順序 (数値が大きいほど信頼度が高い)
+_THICKNESS_RELIABILITY = {
+    "rect": 3,
+    "nearby_rect": 2,
+    "line_stroke": 1,
+    "fallback": 0,
+}
+
+
+def _pick_better_thickness(wall_a: dict, wall_b: dict) -> tuple[float, str]:
+    """
+    2 つの wall から、より信頼度の高い thickness を選ぶ。
+
+    同じ信頼度の場合は thickness が大きい方を採用する。
+    返り値は (thickness, source) のタプル。
+    """
+    src_a = wall_a.get("_thickness_source", "fallback")
+    src_b = wall_b.get("_thickness_source", "fallback")
+    rel_a = _THICKNESS_RELIABILITY.get(src_a, 0)
+    rel_b = _THICKNESS_RELIABILITY.get(src_b, 0)
+
+    if rel_a > rel_b:
+        return wall_a["thickness"], src_a
+    elif rel_b > rel_a:
+        return wall_b["thickness"], src_b
+    else:
+        # 同じ信頼度 → 大きい方
+        if wall_a["thickness"] >= wall_b["thickness"]:
+            return wall_a["thickness"], src_a
+        else:
+            return wall_b["thickness"], src_b
+
+
+# ═══════════════════════════════════════════════════════════
 # 壁候補の正規化・重複除去・マージ（Phase 8A 継続 — 暫定ルールベース）
 #
 # 処理パイプライン:
-#   raw walls → 正規化 → 重複除去 → 同一直線上マージ → id 振り直し
+#   raw walls → 正規化 → thickness 補完 → 重複除去 → 同一直線上マージ → id 振り直し
 #
 # 【正規化】
 #   水平線: startX <= endX に統一
@@ -274,7 +390,7 @@ def _deduplicate_walls(walls: list[dict]) -> list[dict]:
     ほぼ同一の壁候補を除去する。
 
     始点・終点がともに DEDUP_TOLERANCE_MM 以内の wall を同一とみなす。
-    重複時は thickness が大きい方を残す。
+    重複時は信頼度の高い thickness を持つ方を残す。
     """
     result: list[dict] = []
     for wall in walls:
@@ -287,9 +403,10 @@ def _deduplicate_walls(walls: list[dict]) -> list[dict]:
                 dup_idx = i
                 break
         if dup_idx is not None:
-            # 重複 → thickness が大きい方を残す
-            if wall["thickness"] > result[dup_idx]["thickness"]:
-                result[dup_idx] = wall
+            # 重複 → 信頼度の高い thickness を採用
+            better_t, better_src = _pick_better_thickness(result[dup_idx], wall)
+            result[dup_idx]["thickness"] = better_t
+            result[dup_idx]["_thickness_source"] = better_src
         else:
             result.append(wall)
     return result
@@ -355,8 +472,10 @@ def _merge_axis_group(walls: list[dict], axis: str) -> list[dict]:
                 avg_x = round((prev["startX"] + wall["startX"]) / 2, 1)
                 prev["startX"] = avg_x
                 prev["endX"] = avg_x
-            # thickness は最大値を採用
-            prev["thickness"] = max(prev["thickness"], wall["thickness"])
+            # thickness は信頼度の高い方を採用
+            better_t, better_src = _pick_better_thickness(prev, wall)
+            prev["thickness"] = better_t
+            prev["_thickness_source"] = better_src
         else:
             merged.append(dict(wall))
 
@@ -370,9 +489,10 @@ def extract_walls(page) -> list[dict]:
     処理パイプライン:
       1. drawing から raw な壁候補を抽出
       2. 方向を正規化
-      3. ほぼ同一の重複を除去
-      4. 同一直線上の近接壁をマージ
-      5. wall-0, wall-1, ... と id を振り直す
+      3. fallback thickness を rect 由来の代表値で補完
+      4. ほぼ同一の重複を除去
+      5. 同一直線上の近接壁をマージ
+      6. 内部補助情報を除去し、id を振り直す
 
     返り値は ExtractedWall の shape に合致する dict のリスト。
     座標・thickness はすべて mm 単位。
@@ -383,20 +503,30 @@ def extract_walls(page) -> list[dict]:
     # Step 2: 正規化
     normalized = _normalize_walls(raw)
 
-    # Step 3: 重複除去
-    deduped = _deduplicate_walls(normalized)
+    # Step 3: thickness 補完 (fallback → nearby_rect)
+    refined = _refine_thickness(normalized)
 
-    # Step 4: 同一直線上マージ
+    # Step 4: 重複除去
+    deduped = _deduplicate_walls(refined)
+
+    # Step 5: 同一直線上マージ
     merged = _merge_collinear_walls(deduped)
 
-    # Step 5: id 振り直し
+    # Step 6: 内部補助情報を除去し、id を振り直す
     for i, wall in enumerate(merged):
         wall["id"] = f"wall-{i}"
+        wall.pop("_thickness_source", None)
 
     # デバッグ用ログ（stderr に出力。stdout は JSON プロトコル用なので汚さない）
+    # thickness source の分布も出力
+    src_counts: dict[str, int] = {}
+    for w in refined:
+        src = w.get("_thickness_source", "unknown")
+        src_counts[src] = src_counts.get(src, 0) + 1
     print(
-        f"[wall-extract] raw={len(raw)}, normalized={len(normalized)}, "
-        f"deduped={len(deduped)}, merged={len(merged)}",
+        f"[wall-extract] raw={len(raw)}, refined={len(refined)}, "
+        f"deduped={len(deduped)}, merged={len(merged)}, "
+        f"thickness_sources={src_counts}",
         file=sys.stderr,
     )
 

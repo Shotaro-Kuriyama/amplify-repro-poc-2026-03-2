@@ -140,7 +140,12 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 - マージ: 同一直線上 (3mm 以内) で端点間ギャップが 5mm 以内の壁を 1 本にまとめる
 - PDF によっては drawing 情報が無く `walls` が 0 本のままの場合もある（テキスト主体の PDF など）
 - 壁本数は PDF の描画方法（line / rect / 混在）によって異なる
-- 壁厚 (`thickness`) は線の stroke width または矩形の短辺から推定（暫定値）
+- 壁厚 (`thickness`) は以下の優先順位で推定（暫定）:
+  1. rect の短辺 (20mm 以下の場合のみ信頼)
+  2. line の stroke width (1mm 以上の場合のみ参考)
+  3. 同一ページの rect 由来厚みの中央値で補完
+  4. fallback: 5mm (paper mm)
+- 高精度な壁厚推定ではなく、あくまで暫定値。実際の壁厚は図面スケールを考慮して解釈する必要がある
 - 信頼度 (`confidence`) は固定値 0.5
 
 ## 現時点の制約（まだダミー・未実装の部分）
