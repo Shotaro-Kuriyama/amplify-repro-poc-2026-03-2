@@ -16,6 +16,12 @@ const createJobSchema = z.object({
  *
  * Create a new conversion job.
  * Determines fail status from uploaded file names (fail demo).
+ *
+ * ── 責務の境界 ──
+ * [Route Handler に残る] リクエスト検証・ジョブ作成・メタデータ保存・レスポンス返却
+ * [将来 Worker へ移す]  実際の PDF 処理の開始（現在は時間ベースの疑似進捗で代替）
+ *   → Phase 8A で Worker/Python にジョブを dispatch する形に変更する想定
+ *   → その際、ここでは Queue にメッセージを投げるだけになる
  */
 export async function POST(request: NextRequest) {
   let body: unknown;

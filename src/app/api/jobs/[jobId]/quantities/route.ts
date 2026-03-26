@@ -6,6 +6,12 @@ import { errorResponse } from "@/lib/server/helpers";
  * GET /api/jobs/:jobId/quantities
  *
  * Download quantities table data for a completed job.
+ *
+ * ── 責務の境界 ──
+ * [Route Handler に残る] 前提条件チェック・数量データ返却
+ * [将来 Worker へ移す]  なし（データ返却は Route Handler の責務）
+ *   → Phase 8A 以降は Worker が算出した実際の数量データを DB/ストレージから読む形に変わる
+ *   → 現在は MOCK_QUANTITIES を直接返している
  */
 export async function GET(
   _request: NextRequest,

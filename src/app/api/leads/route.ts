@@ -18,6 +18,10 @@ const leadFormSchema = z.object({
  * POST /api/leads
  *
  * Submit a lead form before downloading artifacts.
+ *
+ * ── 責務の境界 ──
+ * [Route Handler に残る] リクエスト検証・リード保存・レスポンス返却
+ * [将来 Worker へ移す]  なし（リード管理は Route Handler / API Server の責務）
  */
 export async function POST(request: NextRequest) {
   let body: unknown;

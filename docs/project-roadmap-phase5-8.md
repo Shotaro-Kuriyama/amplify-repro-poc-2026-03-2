@@ -19,7 +19,7 @@ README やコード上のコメントとは別に、**開発判断の拠り所**
 
 ## 2. 現在地
 
-**Phase 7 の部分は概ね完了（Phase 7.5 着手前）**（2026-03 時点）
+**Phase 7.5 の土台整理が完了（Phase 8A 着手前）**（2026-03 時点）
 
 現時点で整っているもの:
 
@@ -40,9 +40,17 @@ real モード: ブラウザ → real.ts (fetch) → Route Handlers (/api/*) →
 mock モード: ブラウザ → mock.ts（直接呼び出し）
 ```
 
+Phase 7.5 で追加整理したもの:
+
+- **実ファイル保持**: アップロード PDF をローカルディスクに保存する仕組み（`FileStorage` 抽象）
+- **永続化境界の整理**: `FileRepository` / `JobRepository` / `LeadRepository` インターフェースの導入
+- **Phase 8A 型定義**: パイプラインの入力・中間表現・出力の型（`src/types/pipeline.ts`）
+- **Worker 分離境界**: 各 Route Handler に「残る責務」と「将来移す責務」のコメントを追加
+
 補足:
-- 現在の構成は、Phase 7 のモックとしては十分成立している
-- 一方で、実ファイル保持・永続化・重い処理の分離はまだ未整理であり、ここが次の論点になる
+- Phase 7 のモックとしての動作は維持されている
+- 永続化の実体（SQLite 等）はまだ導入していない（インターフェースのみ）
+- 次の論点は Phase 8A（ルールベース PDF 処理の技術検証）
 
 ---
 
@@ -294,31 +302,45 @@ Phase 8    PDF→BIM の技術検証
 
 ## 10. 次の最小アクション
 
-Phase 7 の主要部分が整った今、次に取り組むべきは **Phase 7.5** です。
+Phase 7.5 の土台整理が完了した今、次に取り組むべきは **Phase 8A** です。
 
-### 最小で意味のある次のステップ
+### Phase 7.5 で完了したこと
 
-1. **アップロード PDF の一時保存**
-   - Route Handler 内で受け取った PDF を `/tmp` または外部ストレージに保存する
-   - Phase 8A で PDF 解析に使うための前提
+1. **アップロード PDF の実ファイル保存** ✓
+   - `FileStorage` インターフェースと `LocalFileStorage` を導入
+   - upload Route Handler がファイル実体を `data/uploads/` に保存するようになった
 
-2. **job 状態の永続化方針を決める**
-   - 最小構成: SQLite（ファイルベース DB）
-   - 中規模以降: PostgreSQL
-   - Vercel を使い続ける場合: Vercel KV / Neon 等の外部 DB
+2. **永続化境界の整理** ✓
+   - `FileRepository` / `JobRepository` / `LeadRepository` インターフェースを定義
+   - 現在は InMemory 実装、将来 SQLite / PostgreSQL に差し替え可能
 
-3. **Worker 分離の設計だけ行う**
-   - 実装はしない
-   - ただし「ここからは Route Handler の外で処理する」という境界を設計する
+3. **Worker 分離の設計** ✓
+   - 各 Route Handler に責務境界コメントを追加
+   - 「何が Route Handler に残り、何が Worker に移るか」が明確になった
 
-4. **Phase 8A の最小入力・最小出力を定義する**
-   - 入力: PDF 1枚
-   - 出力: 最小限の構造化データ、または最小 IFC
-   - ここを定義すると、技術検証が進めやすくなる
+4. **Phase 8A の最小入力・最小出力の定義** ✓
+   - `src/types/pipeline.ts` に型を定義
+   - `PipelineInput` → `ExtractedFloorData` → `PipelineOutput` の流れを型で表現
 
-### やらなくてよいこと（Phase 7.5 時点）
+### 次のステップ（Phase 8A に向けて）
+
+1. **最小の PDF テキスト抽出を試す**
+   - Python スクリプト（pdfplumber / PyMuPDF 等）で PDF からテキスト・線分情報を抽出
+   - `PipelineInput` → `ExtractedFloorData` の最小変換を実装
+   - まずは 1 枚の PDF で動くことを確認する
+
+2. **永続化の実体を入れる（必要に応じて）**
+   - Phase 8A の処理が数十秒以上かかる場合、SQLite 導入を検討
+   - 短時間で済むなら in-memory のままでもよい
+
+3. **Worker プロセスの最小実装**
+   - Python スクリプトを子プロセスとして起動する最小構成
+   - または FastAPI の最小エンドポイントとして切り出す
+
+### やらなくてよいこと（Phase 8A 初期）
 
 - 本格的な ML モデルの選定
 - GPU 前提の基盤整備
 - 大規模キューシステム導入
 - 本番運用前提の全自動化
+- 高精度な壁・開口部検出（まずは「動く」ことが最優先）

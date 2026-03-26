@@ -7,6 +7,12 @@ import { errorResponse } from "@/lib/server/helpers";
  *
  * Returns current job status, progress, and artifacts (when completed).
  * Progress is computed from elapsed time since job creation.
+ *
+ * ── 責務の境界 ──
+ * [Route Handler に残る] ジョブ状態の問い合わせ・レスポンス整形
+ * [将来 Worker へ移す]  なし（polling 応答は Route Handler の責務）
+ *   → ただし computeJobState() は現在「時間ベースの疑似進捗」を返しているだけ
+ *   → Phase 8A 以降は DB から Worker が書き込んだ実際の進捗を読む形に変わる
  */
 export async function GET(
   _request: NextRequest,

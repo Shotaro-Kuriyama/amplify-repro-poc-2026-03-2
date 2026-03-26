@@ -9,6 +9,12 @@ const VALID_FORMATS = ["ifc", "rvt", "dwg"];
  *
  * Download a generated artifact file.
  * Returns the file directly as a binary response (案A: 直接ファイルレスポンス).
+ *
+ * ── 責務の境界 ──
+ * [Route Handler に残る] 前提条件チェック・ファイル配信
+ * [将来 Worker へ移す]  なし（ダウンロード配信は Route Handler の責務）
+ *   → Phase 8A 以降は Worker が生成した実ファイルをストレージから読んで返す形に変わる
+ *   → 現在はモックデータを直接返している
  */
 export async function GET(
   _request: NextRequest,
