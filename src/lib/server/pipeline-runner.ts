@@ -5,20 +5,16 @@
  * 1. ジョブを processing 状態にする
  * 2. PipelineInput を組み立てる
  * 3. Python スクリプトを実行する
- * 4. 結果をジョブに保存する（completed or failed）
+ * 4. 最小 IFC artifact を生成する
+ * 5. 結果をジョブに保存する（completed or failed）
  *
  * すべてのジョブは実際のパイプライン実行結果に基づいて状態遷移する。
  * shouldFail のような mock 判定は行わない。
- *
- * エラーは原因に応じて以下のコードで区分する:
- * - PIPELINE_INPUT_ERROR: PipelineInput の組み立て失敗（file 不在 / filePath 不在）
- * - PIPELINE_EXECUTION_ERROR: Python プロセス起動失敗 / non-zero 終了
- * - PIPELINE_OUTPUT_PARSE_ERROR: stdout JSON のパース失敗
- * - PIPELINE_FAILED: Python 側が success: false を返したケース
  */
 
 import { getJob, storeJob } from "./store";
 import { buildPipelineInput, runPipeline } from "./pipeline";
+import { attachMinimalIfcArtifact } from "./ifc-generator";
 
 /**
  * エラーメッセージからエラーコードを推定する。
@@ -79,19 +75,42 @@ export async function executePipelineForJob(jobId: string): Promise<void> {
     const output = await runPipeline(input);
 
     if (output.success) {
-      // ── ステップ 3: preparing_artifacts → completed ──
+      // ── ステップ 3: building_3d_model — 最小 IFC 生成 ──
+      job.pipelineStep = "building_3d_model";
+      storeJob(job);
+
+      let outputWithIfc = output;
+      try {
+        outputWithIfc = await attachMinimalIfcArtifact(jobId, output, input.settings.floorHeight);
+      } catch (ifcErr) {
+        const message = ifcErr instanceof Error
+          ? ifcErr.message
+          : "最小 IFC の生成に失敗しました";
+
+        job.pipelineStatus = "failed";
+        job.pipelineOutput = output;
+        job.pipelineError = { code: "IFC_GENERATION_ERROR", message };
+        job.completedAt = new Date().toISOString();
+        storeJob(job);
+
+        console.error(`[pipeline-runner] Job ${jobId} IFC generation failed:`, message);
+        return;
+      }
+
+      // ── ステップ 4: preparing_artifacts → completed ──
       job.pipelineStep = "preparing_artifacts";
       job.pipelineStatus = "completed";
-      job.pipelineOutput = output;
+      job.pipelineOutput = outputWithIfc;
       job.completedAt = new Date().toISOString();
       storeJob(job);
 
       console.log(
         `[pipeline-runner] Job ${jobId} completed:`,
-        `walls=${output.stats.totalWalls}`,
-        `openings=${output.stats.totalOpenings}`,
-        `rooms=${output.stats.totalRooms}`,
-        `duration=${output.stats.durationMs}ms`
+        `walls=${outputWithIfc.stats.totalWalls}`,
+        `openings=${outputWithIfc.stats.totalOpenings}`,
+        `rooms=${outputWithIfc.stats.totalRooms}`,
+        `duration=${outputWithIfc.stats.durationMs}ms`,
+        `artifacts=${outputWithIfc.artifacts.map((artifact) => artifact.format).join(",")}`
       );
     } else {
       // Python が success: false を返した

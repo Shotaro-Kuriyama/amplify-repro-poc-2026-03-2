@@ -1,3 +1,4 @@
+import path from "path";
 import { NextRequest } from "next/server";
 import { getJob, computeJobState, MOCK_ARTIFACTS } from "@/lib/server/store";
 import { errorResponse } from "@/lib/server/helpers";
@@ -34,7 +35,9 @@ export async function GET(
         ? job.pipelineOutput!.artifacts.map((a, i) => ({
             id: `artifact-${i}`,
             format: a.format,
-            fileName: a.filePath === "(inline)" ? "structured.json" : a.filePath,
+            fileName: a.filePath === "(inline)"
+              ? "structured.json"
+              : path.basename(a.filePath),
             size: a.size,
           }))
         : MOCK_ARTIFACTS)
