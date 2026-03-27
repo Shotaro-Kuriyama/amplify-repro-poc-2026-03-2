@@ -244,6 +244,7 @@ curl -X POST http://localhost:3000/api/internal/pipeline/run \
 - `pipelineResult.stats.totalWalls` が 0 以外であること（drawing 情報を含む PDF の場合）
 - `pipelineResult.stats.durationMs` に処理時間が入っていること
 - `quantitiesReady: true` であること
+- フロント UI の viewer が pipelineResult の walls/openings を元に表示されること（real モード）
 
 ### walls に関する補足
 

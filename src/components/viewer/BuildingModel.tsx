@@ -1,123 +1,181 @@
 "use client";
 
-import { useRef, useMemo } from "react";
-import { useFrame } from "@react-three/fiber";
-import * as THREE from "three";
+import type { PipelineViewerFloor, PipelineViewerModel } from "@/types";
 
 interface BuildingModelProps {
   floors?: number;
   floorHeight?: number;
   planOpacity?: number;
+  pipelineModel?: PipelineViewerModel | null;
+}
+
+const SLAB_THICKNESS = 0.08;
+
+function toCenteredX(xInMillimeters: number, pageWidthInMillimeters: number): number {
+  return xInMillimeters / 1000 - pageWidthInMillimeters / 2000;
+}
+
+function toCenteredZ(yInMillimeters: number, pageHeightInMillimeters: number): number {
+  return -(yInMillimeters / 1000 - pageHeightInMillimeters / 2000);
+}
+
+function renderPipelineFloor(
+  floor: PipelineViewerFloor,
+  floorIndex: number,
+  floorHeight: number,
+  planOpacity: number
+) {
+  const wallColor = "#cbd5e1";
+  const floorColor = "#f8fafc";
+  const windowColor = "#38bdf8";
+  const doorColor = "#f59e0b";
+  const unknownColor = "#a78bfa";
+
+  const pageWidth = Math.max(floor.pageWidth / 1000, 2);
+  const pageHeight = Math.max(floor.pageHeight / 1000, 2);
+  const wallHeight = Math.max(floorHeight - SLAB_THICKNESS, 0.2);
+  const baseY = floorIndex * floorHeight;
+
+  return (
+    <group key={`floor-${floorIndex}`} position={[0, baseY, 0]}>
+      <mesh position={[0, SLAB_THICKNESS / 2, 0]} receiveShadow>
+        <boxGeometry args={[pageWidth, SLAB_THICKNESS, pageHeight]} />
+        <meshStandardMaterial color={floorColor} />
+      </mesh>
+
+      {floor.walls.map((wall, wallIndex) => {
+        const startX = toCenteredX(wall.startX, floor.pageWidth);
+        const startZ = toCenteredZ(wall.startY, floor.pageHeight);
+        const endX = toCenteredX(wall.endX, floor.pageWidth);
+        const endZ = toCenteredZ(wall.endY, floor.pageHeight);
+
+        const deltaX = endX - startX;
+        const deltaZ = endZ - startZ;
+        const length = Math.hypot(deltaX, deltaZ);
+        if (length < 0.03) return null;
+
+        const thickness = Math.max(wall.thickness / 1000, 0.05);
+        const centerX = (startX + endX) / 2;
+        const centerZ = (startZ + endZ) / 2;
+        const rotationY = Math.atan2(deltaZ, deltaX);
+
+        return (
+          <mesh
+            key={`wall-${floorIndex}-${wall.id || wallIndex}`}
+            position={[centerX, SLAB_THICKNESS + wallHeight / 2, centerZ]}
+            rotation={[0, -rotationY, 0]}
+            castShadow
+          >
+            <boxGeometry args={[length, wallHeight, thickness]} />
+            <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
+          </mesh>
+        );
+      })}
+
+      {floor.openings.map((opening, openingIndex) => {
+        const centerX = toCenteredX(opening.centerX, floor.pageWidth);
+        const centerZ = toCenteredZ(opening.centerY, floor.pageHeight);
+        const width = Math.max(opening.width / 1000, 0.5);
+        const height = Math.min(Math.max(opening.height / 1000, 0.8), wallHeight - 0.1);
+        const depth = 0.06;
+
+        const color = opening.type === "window"
+          ? windowColor
+          : opening.type === "door"
+            ? doorColor
+            : unknownColor;
+
+        const y = opening.type === "window"
+          ? SLAB_THICKNESS + wallHeight * 0.58
+          : SLAB_THICKNESS + height / 2;
+
+        return (
+          <mesh
+            key={`opening-${floorIndex}-${opening.id || openingIndex}`}
+            position={[centerX, y, centerZ]}
+            castShadow
+          >
+            <boxGeometry args={[width, height, depth]} />
+            <meshStandardMaterial color={color} transparent opacity={0.72} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function FallbackModel({
+  floors,
+  floorHeight,
+  planOpacity,
+}: {
+  floors: number;
+  floorHeight: number;
+  planOpacity: number;
+}) {
+  const wallColor = "#e2e8f0";
+  const floorColor = "#f1f5f9";
+
+  return (
+    <group>
+      {Array.from({ length: floors }).map((_, floorIndex) => {
+        const baseY = floorIndex * floorHeight;
+        const wallHeight = Math.max(floorHeight - SLAB_THICKNESS, 0.2);
+        const wallThickness = 0.15;
+
+        return (
+          <group key={`fallback-floor-${floorIndex}`} position={[0, baseY, 0]}>
+            <mesh position={[0, SLAB_THICKNESS / 2, 0]} receiveShadow>
+              <boxGeometry args={[10, SLAB_THICKNESS, 8]} />
+              <meshStandardMaterial color={floorColor} />
+            </mesh>
+
+            <mesh position={[0, SLAB_THICKNESS + wallHeight / 2, 4 - wallThickness / 2]} castShadow>
+              <boxGeometry args={[10, wallHeight, wallThickness]} />
+              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
+            </mesh>
+            <mesh position={[0, SLAB_THICKNESS + wallHeight / 2, -4 + wallThickness / 2]} castShadow>
+              <boxGeometry args={[10, wallHeight, wallThickness]} />
+              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
+            </mesh>
+            <mesh position={[-5 + wallThickness / 2, SLAB_THICKNESS + wallHeight / 2, 0]} castShadow>
+              <boxGeometry args={[wallThickness, wallHeight, 8]} />
+              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
+            </mesh>
+            <mesh position={[5 - wallThickness / 2, SLAB_THICKNESS + wallHeight / 2, 0]} castShadow>
+              <boxGeometry args={[wallThickness, wallHeight, 8]} />
+              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
+            </mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
 }
 
 export function BuildingModel({
   floors = 1,
   floorHeight = 2.8,
   planOpacity = 0.7,
+  pipelineModel,
 }: BuildingModelProps) {
-  const groupRef = useRef<THREE.Group>(null);
+  const hasPipelineFloors = !!pipelineModel && pipelineModel.floors.length > 0;
 
-  useFrame((_, delta) => {
-    if (groupRef.current) {
-      groupRef.current.rotation.y += delta * 0.08;
-    }
-  });
-
-  const slabThickness = 0.2;
-  const wallThickness = 0.15;
-  const wallHeight = Math.max(floorHeight - slabThickness, 0.1);
-
-  const wallColor = "#e2e8f0";
-  const wallEdgeColor = "#94a3b8";
-  const floorColor = "#f1f5f9";
-  const windowColor = "#7dd3fc";
-  const doorColor = "#fbbf24";
-
-  const edgeGeometries = useMemo(() => {
-    const wt = wallThickness;
-    return [
-      { pos: [0, slabThickness + wallHeight / 2, 4 - wt / 2] as const, geo: new THREE.BoxGeometry(10, wallHeight, wt) },
-      { pos: [0, slabThickness + wallHeight / 2, -4 + wt / 2] as const, geo: new THREE.BoxGeometry(10, wallHeight, wt) },
-      { pos: [-5 + wt / 2, slabThickness + wallHeight / 2, 0] as const, geo: new THREE.BoxGeometry(wt, wallHeight, 8) },
-      { pos: [5 - wt / 2, slabThickness + wallHeight / 2, 0] as const, geo: new THREE.BoxGeometry(wt, wallHeight, 8) },
-    ];
-  }, [wallHeight]);
+  if (!hasPipelineFloors) {
+    return (
+      <FallbackModel
+        floors={Math.max(floors, 1)}
+        floorHeight={floorHeight}
+        planOpacity={planOpacity}
+      />
+    );
+  }
 
   return (
-    <group ref={groupRef} position={[0, 0, 0]}>
-      {Array.from({ length: floors }).map((_, floorIndex) => {
-        const baseY = floorIndex * floorHeight;
-
-        return (
-          <group key={floorIndex} position={[0, baseY, 0]}>
-            {/* Floor slab: bottom = y=0 */}
-            <mesh position={[0, slabThickness / 2, 0]} receiveShadow>
-              <boxGeometry args={[10, slabThickness, 8]} />
-              <meshStandardMaterial color={floorColor} />
-            </mesh>
-
-            {/* Outer walls */}
-            <mesh position={[0, slabThickness + wallHeight / 2, 4 - wallThickness / 2]} castShadow>
-              <boxGeometry args={[10, wallHeight, wallThickness]} />
-              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
-            </mesh>
-            <mesh position={[0, slabThickness + wallHeight / 2, -4 + wallThickness / 2]} castShadow>
-              <boxGeometry args={[10, wallHeight, wallThickness]} />
-              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
-            </mesh>
-            <mesh position={[-5 + wallThickness / 2, slabThickness + wallHeight / 2, 0]} castShadow>
-              <boxGeometry args={[wallThickness, wallHeight, 8]} />
-              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
-            </mesh>
-            <mesh position={[5 - wallThickness / 2, slabThickness + wallHeight / 2, 0]} castShadow>
-              <boxGeometry args={[wallThickness, wallHeight, 8]} />
-              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
-            </mesh>
-
-            {/* Interior walls */}
-            <mesh position={[0, slabThickness + wallHeight / 2, -0.5]} castShadow>
-              <boxGeometry args={[6, wallHeight, wallThickness]} />
-              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
-            </mesh>
-            <mesh position={[-1.5, slabThickness + wallHeight / 2, 2]} castShadow>
-              <boxGeometry args={[wallThickness, wallHeight, 3.8]} />
-              <meshStandardMaterial color={wallColor} transparent opacity={planOpacity} />
-            </mesh>
-
-            {/* Windows */}
-            {[-3, 0, 3].map((x) => (
-              <mesh key={`wf-${x}`} position={[x, slabThickness + wallHeight * 0.55, 4]} castShadow>
-                <boxGeometry args={[1.2, 1, 0.08]} />
-                <meshStandardMaterial color={windowColor} transparent opacity={0.6} />
-              </mesh>
-            ))}
-
-            {[-2, 2].map((x) => (
-              <mesh key={`wb-${x}`} position={[x, slabThickness + wallHeight * 0.55, -4]} castShadow>
-                <boxGeometry args={[1.4, 1, 0.08]} />
-                <meshStandardMaterial color={windowColor} transparent opacity={0.6} />
-              </mesh>
-            ))}
-
-            {/* Door */}
-            <mesh position={[1.5, slabThickness + 1, 4]} castShadow>
-              <boxGeometry args={[0.9, 2, 0.08]} />
-              <meshStandardMaterial color={doorColor} transparent opacity={0.7} />
-            </mesh>
-
-            {/* Wall edges */}
-            {edgeGeometries.map((e, i) => (
-              <lineSegments
-                key={`edge-${floorIndex}-${i}`}
-                position={[e.pos[0], baseY + e.pos[1], e.pos[2]]}
-              >
-                <edgesGeometry args={[e.geo]} />
-                <lineBasicMaterial color={wallEdgeColor} transparent opacity={0.3} />
-              </lineSegments>
-            ))}
-          </group>
-        );
-      })}
+    <group>
+      {pipelineModel.floors.map((floor, floorIndex) =>
+        renderPipelineFloor(floor, floorIndex, floorHeight, planOpacity)
+      )}
     </group>
   );
 }

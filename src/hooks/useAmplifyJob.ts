@@ -1,29 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AmplifyJob, ConversionSettings, JobArtifact, JobStatus, PipelineResultSummary } from "@/types";
+import type {
+  AmplifyJob,
+  ConversionSettings,
+  JobArtifact,
+  JobStatus,
+  PipelineResultSummary,
+  PipelineViewerFloor,
+  PipelineViewerModel,
+  PipelineViewerOpening,
+  PipelineViewerWall,
+} from "@/types";
 import type { ApiJobStatus, ApiProcessingStep, GetJobResponse } from "@/lib/api/types";
 import { api } from "@/lib/api/client";
 import { normalizeError } from "@/lib/api/errors";
 
-// ── Polling config ──
-
-/** How often to poll getAmplifyJob while processing (ms) */
 const POLL_INTERVAL = 1500;
 
-// ── API → UI mapping ──
-
-/**
- * Map backend job status to UI job status.
- * `queued` is treated as `processing` in the UI — the user sees
- * a single "converting" state regardless of backend queue handling.
- */
 function mapApiStatus(apiStatus: ApiJobStatus): JobStatus {
   if (apiStatus === "queued") return "processing";
-  return apiStatus; // processing, completed, failed map directly
+  return apiStatus;
 }
 
-/** Map API processing step to step index (0-based) */
 const STEP_INDEX_MAP: Record<ApiProcessingStep, number> = {
   analyzing_plans: 0,
   detecting_walls_and_openings: 1,
@@ -31,32 +30,92 @@ const STEP_INDEX_MAP: Record<ApiProcessingStep, number> = {
   preparing_artifacts: 3,
 };
 
-/**
- * Phase 8A: API の pipelineResult (Record<string, unknown>) を
- * UI 用の PipelineResultSummary に変換する。
- */
-function parsePipelineResult(raw: Record<string, unknown>): PipelineResultSummary | null {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function toString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function parseWall(raw: unknown): PipelineViewerWall | null {
+  if (!isRecord(raw)) return null;
+  return {
+    id: toString(raw.id, ""),
+    startX: toNumber(raw.startX),
+    startY: toNumber(raw.startY),
+    endX: toNumber(raw.endX),
+    endY: toNumber(raw.endY),
+    thickness: Math.max(toNumber(raw.thickness), 0),
+  };
+}
+
+function parseOpening(raw: unknown): PipelineViewerOpening | null {
+  if (!isRecord(raw)) return null;
+  const openingType = raw.type === "door" || raw.type === "window" || raw.type === "unknown"
+    ? raw.type
+    : "unknown";
+
+  return {
+    id: toString(raw.id, ""),
+    type: openingType,
+    centerX: toNumber(raw.centerX),
+    centerY: toNumber(raw.centerY),
+    width: Math.max(toNumber(raw.width), 0),
+    height: Math.max(toNumber(raw.height), 0),
+    wallId: raw.wallId ? toString(raw.wallId, "") : undefined,
+  };
+}
+
+function parseFloor(raw: unknown): PipelineViewerFloor | null {
+  if (!isRecord(raw)) return null;
+
+  const walls = Array.isArray(raw.walls)
+    ? raw.walls
+      .map(parseWall)
+      .filter((wall): wall is PipelineViewerWall => wall !== null)
+    : [];
+
+  const openings = Array.isArray(raw.openings)
+    ? raw.openings
+      .map(parseOpening)
+      .filter((opening): opening is PipelineViewerOpening => opening !== null)
+    : [];
+
+  const source = isRecord(raw.source) ? raw.source : {};
+
+  return {
+    floorLabel: toString(raw.floorLabel, ""),
+    pageWidth: toNumber(source.pageWidth),
+    pageHeight: toNumber(source.pageHeight),
+    roomCount: Array.isArray(raw.rooms) ? raw.rooms.length : 0,
+    walls,
+    openings,
+  };
+}
+
+function parsePipelineModel(raw: Record<string, unknown>): PipelineViewerModel | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = raw as any;
+    const floors = Array.isArray(raw.floors)
+      ? raw.floors
+        .map(parseFloor)
+        .filter((floor): floor is PipelineViewerFloor => floor !== null)
+      : [];
+
+    const stats = isRecord(raw.stats) ? raw.stats : {};
+
     return {
-      success: !!data.success,
-      floors: (Array.isArray(data.floors) ? data.floors : []).map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (f: any) => ({
-          floorLabel: f.floorLabel ?? "",
-          wallCount: Array.isArray(f.walls) ? f.walls.length : 0,
-          openingCount: Array.isArray(f.openings) ? f.openings.length : 0,
-          roomCount: Array.isArray(f.rooms) ? f.rooms.length : 0,
-          pageWidth: f.source?.pageWidth ?? 0,
-          pageHeight: f.source?.pageHeight ?? 0,
-        })
-      ),
+      success: !!raw.success,
+      floors,
       stats: {
-        totalWalls: data.stats?.totalWalls ?? 0,
-        totalOpenings: data.stats?.totalOpenings ?? 0,
-        totalRooms: data.stats?.totalRooms ?? 0,
-        durationMs: data.stats?.durationMs ?? 0,
+        totalWalls: toNumber(stats.totalWalls),
+        totalOpenings: toNumber(stats.totalOpenings),
+        totalRooms: toNumber(stats.totalRooms),
+        durationMs: toNumber(stats.durationMs),
       },
     };
   } catch {
@@ -64,15 +123,32 @@ function parsePipelineResult(raw: Record<string, unknown>): PipelineResultSummar
   }
 }
 
-/** Map a GetJobResponse to UI-facing AmplifyJob + artifacts + pipelineResult */
+function toSummary(model: PipelineViewerModel): PipelineResultSummary {
+  return {
+    success: model.success,
+    floors: model.floors.map((floor) => ({
+      floorLabel: floor.floorLabel,
+      wallCount: floor.walls.length,
+      openingCount: floor.openings.length,
+      roomCount: floor.roomCount,
+      pageWidth: floor.pageWidth,
+      pageHeight: floor.pageHeight,
+    })),
+    stats: model.stats,
+  };
+}
+
 function mapGetJobResponse(res: GetJobResponse): {
   job: AmplifyJob;
   artifacts: JobArtifact[];
   pipelineResult: PipelineResultSummary | null;
+  pipelineModel: PipelineViewerModel | null;
 } {
-  const stepIndex = res.currentStep
-    ? STEP_INDEX_MAP[res.currentStep]
-    : 0;
+  const stepIndex = res.currentStep ? STEP_INDEX_MAP[res.currentStep] : 0;
+
+  const pipelineModel = res.pipelineResult
+    ? parsePipelineModel(res.pipelineResult)
+    : null;
 
   return {
     job: {
@@ -80,22 +156,18 @@ function mapGetJobResponse(res: GetJobResponse): {
       status: mapApiStatus(res.status),
       progress: res.progress,
       progressStep: stepIndex,
-      progressMessage: "", // UI derives from stepIndex + i18n
+      progressMessage: "",
       createdAt: res.createdAt,
       completedAt: res.completedAt ?? undefined,
       error: res.error?.message,
       errorCode: res.error?.code,
     },
     artifacts: res.artifacts ?? [],
-    pipelineResult: res.pipelineResult
-      ? parsePipelineResult(res.pipelineResult)
-      : null,
+    pipelineResult: pipelineModel ? toSummary(pipelineModel) : null,
+    pipelineModel,
   };
 }
 
-// ── Hook ──
-
-/** Phase 8A: fileId と floorLabel の対応 */
 interface FileEntry {
   fileId: string;
   floorLabel: string;
@@ -106,11 +178,9 @@ interface UseAmplifyJobReturn {
   job: AmplifyJob | null;
   artifacts: JobArtifact[];
   error: string | null;
-  /** Phase 8A: エラーコード（failed 時） */
   errorCode: string | null;
-  /** Phase 8A: パイプライン結果サマリー（completed 時） */
   pipelineResult: PipelineResultSummary | null;
-  /** Phase 8A: files に fileId + floorLabel の対応を渡す */
+  pipelineModel: PipelineViewerModel | null;
   startConversion: (files: FileEntry[], settings: ConversionSettings) => Promise<void>;
   reset: () => void;
 }
@@ -122,6 +192,7 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [pipelineResult, setPipelineResult] = useState<PipelineResultSummary | null>(null);
+  const [pipelineModel, setPipelineModel] = useState<PipelineViewerModel | null>(null);
 
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollFnRef = useRef<((jobId: string) => void) | null>(null);
@@ -133,7 +204,6 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
     }
   }, []);
 
-  // Keep the polling function in a ref to avoid circular dependency
   useEffect(() => {
     pollFnRef.current = async (jobId: string) => {
       try {
@@ -145,6 +215,7 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
           setStatus("completed");
           setArtifacts(mapped.artifacts);
           setPipelineResult(mapped.pipelineResult);
+          setPipelineModel(mapped.pipelineModel);
           return;
         }
 
@@ -155,7 +226,6 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
           return;
         }
 
-        // Continue polling at fixed interval
         pollingRef.current = setTimeout(() => {
           pollFnRef.current?.(jobId);
         }, POLL_INTERVAL);
@@ -175,10 +245,10 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
       setErrorCode(null);
       setArtifacts([]);
       setPipelineResult(null);
+      setPipelineModel(null);
 
       try {
-        // Phase 8A: fileId と floorLabel の対応を API に渡す
-        const fileIds = files.map((f) => f.fileId);
+        const fileIds = files.map((file) => file.fileId);
         const res = await api.createAmplifyJob({
           fileIds,
           files,
@@ -188,7 +258,6 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
           },
         });
 
-        // Map createJob response to initial UI job state
         const initialJob: AmplifyJob = {
           id: res.jobId,
           status: mapApiStatus(res.status),
@@ -199,7 +268,6 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
         };
         setJob(initialJob);
 
-        // Start polling for progress
         pollingRef.current = setTimeout(() => {
           pollFnRef.current?.(res.jobId);
         }, POLL_INTERVAL);
@@ -220,12 +288,22 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
     setError(null);
     setErrorCode(null);
     setPipelineResult(null);
+    setPipelineModel(null);
   }, [stopPolling]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => stopPolling();
   }, [stopPolling]);
 
-  return { status, job, artifacts, error, errorCode, pipelineResult, startConversion, reset };
+  return {
+    status,
+    job,
+    artifacts,
+    error,
+    errorCode,
+    pipelineResult,
+    pipelineModel,
+    startConversion,
+    reset,
+  };
 }

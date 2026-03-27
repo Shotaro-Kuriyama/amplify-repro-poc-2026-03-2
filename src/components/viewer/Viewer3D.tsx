@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useRef, useCallback, useEffect, useImperativeHandle, forwardRef } from "react";
+import { Suspense, useRef, useCallback, useEffect, useMemo, useImperativeHandle, forwardRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import {
   OrbitControls,
@@ -11,7 +11,7 @@ import {
 } from "@react-three/drei";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import type { ConversionSettings, JobStatus } from "@/types";
+import type { ConversionSettings, JobStatus, PipelineViewerModel } from "@/types";
 import { useI18n } from "@/lib/i18n/context";
 import { BuildingModel } from "./BuildingModel";
 import { ViewerControls } from "./ViewerControls";
@@ -29,11 +29,20 @@ interface Viewer3DProps {
   onSettingsChange: (settings: ConversionSettings) => void;
   resetViewTrigger?: number;
   error?: string | null;
+  pipelineModel?: PipelineViewerModel | null;
 }
 
-// Expose reset via imperative handle so parent can trigger it
 interface SceneHandle {
   resetView: () => void;
+}
+
+interface SceneBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
 }
 
 interface SceneContentProps {
@@ -41,11 +50,155 @@ interface SceneContentProps {
   floorHeight: number;
   opacity: number;
   cameraMode: "perspective" | "orthographic";
+  pipelineModel?: PipelineViewerModel | null;
+  sceneBounds: SceneBounds;
+  fitKey: string;
+}
+
+function toCenteredX(xInMillimeters: number, pageWidthInMillimeters: number): number {
+  return xInMillimeters / 1000 - pageWidthInMillimeters / 2000;
+}
+
+function toCenteredZ(yInMillimeters: number, pageHeightInMillimeters: number): number {
+  return -(yInMillimeters / 1000 - pageHeightInMillimeters / 2000);
+}
+
+function computeSceneBounds(
+  pipelineModel: PipelineViewerModel | null | undefined,
+  floors: number,
+  floorHeight: number
+): SceneBounds {
+  if (!pipelineModel || pipelineModel.floors.length === 0) {
+    const totalHeight = Math.max(floors, 1) * floorHeight;
+    return {
+      minX: -5,
+      maxX: 5,
+      minY: 0,
+      maxY: totalHeight,
+      minZ: -4,
+      maxZ: 4,
+    };
+  }
+
+  let minX = Infinity;
+  const minY = 0;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+
+  pipelineModel.floors.forEach((floor, floorIndex) => {
+    const baseY = floorIndex * floorHeight;
+    const halfWidth = floor.pageWidth / 2000;
+    const halfHeight = floor.pageHeight / 2000;
+
+    minX = Math.min(minX, -halfWidth);
+    maxX = Math.max(maxX, halfWidth);
+    minZ = Math.min(minZ, -halfHeight);
+    maxZ = Math.max(maxZ, halfHeight);
+
+    floor.walls.forEach((wall) => {
+      const startX = toCenteredX(wall.startX, floor.pageWidth);
+      const startZ = toCenteredZ(wall.startY, floor.pageHeight);
+      const endX = toCenteredX(wall.endX, floor.pageWidth);
+      const endZ = toCenteredZ(wall.endY, floor.pageHeight);
+      const margin = Math.max(wall.thickness / 1000, 0.05) / 2;
+
+      minX = Math.min(minX, startX - margin, endX - margin);
+      maxX = Math.max(maxX, startX + margin, endX + margin);
+      minZ = Math.min(minZ, startZ - margin, endZ - margin);
+      maxZ = Math.max(maxZ, startZ + margin, endZ + margin);
+    });
+
+    floor.openings.forEach((opening) => {
+      const centerX = toCenteredX(opening.centerX, floor.pageWidth);
+      const centerZ = toCenteredZ(opening.centerY, floor.pageHeight);
+      const width = Math.max(opening.width / 1000, 0.5);
+      const depth = 0.06;
+
+      minX = Math.min(minX, centerX - width / 2);
+      maxX = Math.max(maxX, centerX + width / 2);
+      minZ = Math.min(minZ, centerZ - depth / 2);
+      maxZ = Math.max(maxZ, centerZ + depth / 2);
+    });
+
+    maxY = Math.max(maxY, baseY + floorHeight);
+  });
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
+    const totalHeight = Math.max(floors, 1) * floorHeight;
+    return {
+      minX: -5,
+      maxX: 5,
+      minY: 0,
+      maxY: totalHeight,
+      minZ: -4,
+      maxZ: 4,
+    };
+  }
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY: Math.max(maxY, floorHeight),
+    minZ,
+    maxZ,
+  };
 }
 
 const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
-  function SceneContent({ floors, floorHeight, opacity, cameraMode }, ref) {
+  function SceneContent(
+    { floors, floorHeight, opacity, cameraMode, pipelineModel, sceneBounds, fitKey },
+    ref
+  ) {
     const controlsRef = useRef<OrbitControlsImpl>(null);
+    const perspectiveCameraRef = useRef<THREE.PerspectiveCamera>(null);
+    const orthographicCameraRef = useRef<THREE.OrthographicCamera>(null);
+    const lastFitSignatureRef = useRef<string>("");
+
+    const fitCameraToBounds = useCallback(() => {
+      const controls = controlsRef.current;
+      const camera = cameraMode === "perspective"
+        ? perspectiveCameraRef.current
+        : orthographicCameraRef.current;
+
+      if (!controls || !camera) return;
+
+      const center = new THREE.Vector3(
+        (sceneBounds.minX + sceneBounds.maxX) / 2,
+        (sceneBounds.minY + sceneBounds.maxY) / 2,
+        (sceneBounds.minZ + sceneBounds.maxZ) / 2
+      );
+
+      const sizeX = sceneBounds.maxX - sceneBounds.minX;
+      const sizeY = sceneBounds.maxY - sceneBounds.minY;
+      const sizeZ = sceneBounds.maxZ - sceneBounds.minZ;
+      const radius = Math.max(sizeX, sizeY, sizeZ, 1);
+
+      const distance = Math.max(radius * 1.9, 7);
+      camera.position.set(
+        center.x + distance,
+        center.y + distance * 0.8,
+        center.z + distance
+      );
+
+      controls.target.copy(center);
+      controls.minDistance = Math.max(radius * 0.15, 1.5);
+      controls.maxDistance = Math.max(radius * 10, 45);
+
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.near = 0.1;
+        camera.far = Math.max(distance * 20, 300);
+      } else if (camera instanceof THREE.OrthographicCamera) {
+        camera.zoom = Math.min(Math.max(70 / radius, 10), 140);
+      }
+
+      camera.updateProjectionMatrix();
+      camera.lookAt(center);
+      controls.update();
+      controls.saveState();
+    }, [cameraMode, sceneBounds]);
 
     useImperativeHandle(ref, () => ({
       resetView: () => {
@@ -53,22 +206,38 @@ const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
       },
     }));
 
+    useEffect(() => {
+      const signature = `${fitKey}:${cameraMode}`;
+      if (lastFitSignatureRef.current === signature) return;
+      lastFitSignatureRef.current = signature;
+      fitCameraToBounds();
+    }, [fitKey, cameraMode, fitCameraToBounds]);
+
     return (
       <>
         {cameraMode === "perspective" ? (
-          <PerspectiveCamera makeDefault position={[15, 12, 15]} fov={45} />
+          <PerspectiveCamera
+            ref={perspectiveCameraRef}
+            makeDefault
+            position={[15, 12, 15]}
+            fov={45}
+          />
         ) : (
-          <OrthographicCamera makeDefault position={[15, 12, 15]} zoom={30} />
+          <OrthographicCamera
+            ref={orthographicCameraRef}
+            makeDefault
+            position={[15, 12, 15]}
+            zoom={30}
+          />
         )}
         <OrbitControls
           ref={controlsRef}
           enableDamping
           dampingFactor={0.08}
-          minDistance={5}
-          maxDistance={50}
+          minDistance={1.5}
+          maxDistance={120}
         />
 
-        {/* Lighting */}
         <ambientLight intensity={0.5} />
         <directionalLight
           position={[10, 20, 10]}
@@ -79,9 +248,8 @@ const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
         />
         <directionalLight position={[-5, 10, -5]} intensity={0.3} />
 
-        {/* Grid */}
         <Grid
-          args={[40, 40]}
+          args={[80, 80]}
           position={[0, -0.01, 0]}
           cellSize={1}
           cellThickness={0.5}
@@ -89,17 +257,20 @@ const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
           sectionSize={5}
           sectionThickness={1}
           sectionColor="#cbd5e1"
-          fadeDistance={30}
+          fadeDistance={45}
           fadeStrength={1}
         />
 
-        {/* Environment — inside Suspense within Canvas to prevent context loss */}
         <Suspense fallback={null}>
           <Environment preset="city" />
         </Suspense>
 
-        {/* Building — floorHeight & opacity now driven by Settings */}
-        <BuildingModel floors={floors} floorHeight={floorHeight} planOpacity={opacity} />
+        <BuildingModel
+          floors={floors}
+          floorHeight={floorHeight}
+          planOpacity={opacity}
+          pipelineModel={pipelineModel}
+        />
       </>
     );
   }
@@ -122,6 +293,7 @@ export function Viewer3D({
   onSettingsChange,
   resetViewTrigger = 0,
   error,
+  pipelineModel,
 }: Viewer3DProps) {
   const { t } = useI18n();
   const sceneRef = useRef<SceneHandle>(null);
@@ -130,7 +302,6 @@ export function Viewer3D({
     sceneRef.current?.resetView();
   }, []);
 
-  // When resetViewTrigger changes from parent (SettingsPanel "Reset View"), fire reset
   const prevTrigger = useRef(resetViewTrigger);
   useEffect(() => {
     if (resetViewTrigger !== prevTrigger.current) {
@@ -138,6 +309,19 @@ export function Viewer3D({
       sceneRef.current?.resetView();
     }
   }, [resetViewTrigger]);
+
+  const sceneBounds = useMemo(
+    () => computeSceneBounds(pipelineModel, floors, settings.floorHeight),
+    [pipelineModel, floors, settings.floorHeight]
+  );
+
+  const fitKey = useMemo(() => {
+    if (!pipelineModel) return `fallback:${floors}`;
+    const signature = pipelineModel.floors
+      .map((floor) => `${floor.floorLabel}:${floor.walls.length}:${floor.openings.length}:${floor.pageWidth}x${floor.pageHeight}`)
+      .join("|");
+    return `${signature}:${pipelineModel.stats.totalWalls}:${pipelineModel.stats.totalOpenings}:${pipelineModel.stats.durationMs}`;
+  }, [pipelineModel, floors]);
 
   const showModel = status === "completed";
   const showProcessing = status === "processing";
@@ -147,7 +331,6 @@ export function Viewer3D({
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-slate-50 to-slate-100/80">
-      {/* 3D Canvas — shown after conversion completes */}
       {showModel && (
         <>
           <Canvas
@@ -160,6 +343,9 @@ export function Viewer3D({
               floorHeight={settings.floorHeight}
               opacity={settings.opacity}
               cameraMode={settings.cameraMode}
+              pipelineModel={pipelineModel}
+              sceneBounds={sceneBounds}
+              fitKey={fitKey}
             />
           </Canvas>
           <ViewerControls
@@ -167,19 +353,16 @@ export function Viewer3D({
             onSettingsChange={onSettingsChange}
             onResetView={handleResetView}
           />
-          {/* Success badge */}
           <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-emerald-600 backdrop-blur-sm">
             <CheckCircle2 className="h-3.5 w-3.5" />
             <span className="text-xs font-medium">{t.viewer.completed}</span>
           </div>
-          {/* Scale indicator */}
           <div className="absolute bottom-3 left-3 rounded-md bg-white/70 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur-sm">
             1:{settings.scale}
           </div>
         </>
       )}
 
-      {/* Processing overlay */}
       {showProcessing && (
         <div className="flex h-full flex-col items-center justify-center gap-6 px-8" role="status" aria-live="polite">
           <div className="relative">
@@ -191,7 +374,6 @@ export function Viewer3D({
               {t.processing.title}
             </h3>
 
-            {/* 4-step indicator */}
             <div className="flex items-center justify-between gap-1">
               {PROCESSING_STEP_LABELS.map((step, i) => {
                 const isDone = progressStep > i;
@@ -232,7 +414,6 @@ export function Viewer3D({
         </div>
       )}
 
-      {/* Error state */}
       {showError && (
         <div className="flex h-full flex-col items-center justify-center gap-4 px-8" role="alert">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10">
@@ -252,7 +433,6 @@ export function Viewer3D({
         </div>
       )}
 
-      {/* Placeholder */}
       {showPlaceholder && (
         <div className="flex h-full flex-col items-center justify-center gap-4 px-8">
           <div

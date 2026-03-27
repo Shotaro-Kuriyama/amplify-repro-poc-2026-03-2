@@ -59,7 +59,7 @@ function AppContent() {
   } = useFileUpload();
 
   // Job state
-  const { status: jobStatus, job, artifacts, error, errorCode, pipelineResult, startConversion, reset } =
+  const { status: jobStatus, job, artifacts, error, errorCode, pipelineResult, pipelineModel, startConversion, reset } =
     useAmplifyJob();
 
   // Start floor for multi-storey
@@ -317,11 +317,12 @@ function AppContent() {
               progress={job?.progress ?? 0}
               progressStep={job?.progressStep ?? 0}
               progressMessage={[t.processing.step1, t.processing.step2, t.processing.step3, t.processing.step4][job?.progressStep ?? 0]}
-              floors={files.length || 1}
+              floors={pipelineModel?.floors.length ?? (files.length || 1)}
               settings={settings}
               onSettingsChange={setSettings}
               resetViewTrigger={resetViewTrigger}
               error={error}
+              pipelineModel={pipelineModel}
             />
           </div>
 

@@ -43,12 +43,13 @@
 - `POST /api/jobs` でジョブ作成 → Python パイプライン自動実行 → 結果を API で返却の縦切り接続
 - floorLabel がフロントエンドからサーバーに渡り、PipelineInput に反映される
 - ジョブの成功/失敗はすべて実パイプライン実行結果に基づく（mock 失敗は廃止）
+- viewer は pipelineResult の壁/開口部を元に簡易 3D を描画し、カメラ fit の挙動を安定化
 
 ### 未完了
 - 斜め壁・曲線壁の検出
 - 二重線パターンの窓検出
 - 高精度なドア記号認識
-- IFC 生成 (構造化 JSON のみ)
+- IFC の opening/door/window セマンティクス追加（現状は壁中心の最小 IFC）
 - 複数ページ PDF 対応
 - rooms の高精度抽出
 
@@ -100,9 +101,8 @@ python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 
 ## 次に進むなら優先すべきこと
 
-### 優先度 1: IFC 構造化 JSON の拡充
-walls / openings の構造化データから IFC 変換の前段階を整理する。
-現在の `PipelineOutput` は `structured_json` を inline で返しているだけ。
+### 優先度 1: IFC の表現拡張（opening/window/door）
+現在は壁中心の最小 IFC まで実装済み。`IfcOpeningElement` などを段階的に追加し、PoC の可視性を上げる。
 
 ### 優先度 2: 二重線パターンの窓検出
 現在の window 検出は rect パターンのみ。壁に沿った短い平行線対を検出すると、より多くの図面に対応可能。

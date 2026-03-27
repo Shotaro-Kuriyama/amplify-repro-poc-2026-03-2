@@ -58,6 +58,46 @@ export interface PipelineResultSummary {
   };
 }
 
+// ── Pipeline result model (Viewer 実データ接続用) ──
+export interface PipelineViewerWall {
+  id: string;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  thickness: number;
+}
+
+export interface PipelineViewerOpening {
+  id: string;
+  type: "door" | "window" | "unknown";
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+  wallId?: string;
+}
+
+export interface PipelineViewerFloor {
+  floorLabel: string;
+  pageWidth: number;
+  pageHeight: number;
+  roomCount: number;
+  walls: PipelineViewerWall[];
+  openings: PipelineViewerOpening[];
+}
+
+export interface PipelineViewerModel {
+  success: boolean;
+  floors: PipelineViewerFloor[];
+  stats: {
+    totalWalls: number;
+    totalOpenings: number;
+    totalRooms: number;
+    durationMs: number;
+  };
+}
+
 // ── Artifacts ──
 export type ArtifactFormat = "ifc" | "rvt" | "dwg" | "structured_json";
 
