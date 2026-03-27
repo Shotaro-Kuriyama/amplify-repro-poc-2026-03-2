@@ -43,11 +43,9 @@ export interface FileRepository {
 export interface StoredJob {
   jobId: string;
   fileIds: string[];
-  shouldFail: boolean;
   scale: number;
   floorHeight: number;
   createdAt: string;
-  startedAtMs: number; // Date.now() when created — used for time-based progression
   /**
    * Phase 8A: fileId → floorLabel の対応。
    * フロントエンドから渡された階ラベル情報を保持する。
@@ -55,16 +53,19 @@ export interface StoredJob {
    */
   floorLabels?: Record<string, string>;
   /**
-   * Phase 8A: パイプライン実行状態。
-   * この値が設定されている場合、時間ベースの疑似進捗ではなく
-   * 実際のパイプライン実行結果を返す。
+   * パイプライン実行状態。
+   * ジョブ作成時は "queued"、パイプライン実行開始で "processing"、
+   * 実行完了で "completed" or "failed" になる。
+   *
+   * すべてのジョブは実際のパイプライン実行結果に基づいて状態遷移する。
+   * 時間ベースの疑似進捗や shouldFail による mock 失敗は廃止された。
    */
-  pipelineStatus?: ApiJobStatus;
-  /** Phase 8A: パイプライン実行結果 */
+  pipelineStatus: ApiJobStatus;
+  /** パイプライン実行結果（成功時） */
   pipelineOutput?: PipelineOutput;
-  /** Phase 8A: パイプライン実行エラー */
+  /** パイプライン実行エラー（失敗時） */
   pipelineError?: { code: string; message: string };
-  /** Phase 8A: 完了日時 */
+  /** 完了日時（completed / failed 時に設定） */
   completedAt?: string;
 }
 
@@ -166,27 +167,20 @@ export function storeLead(lead: StoredLead): void {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Job progression logic — 時間ベースの進捗計算
+// Job state — パイプライン実行結果に基づく状態返却
 // ═══════════════════════════════════════════════════════════
 
-/** Step progression: each entry defines elapsed-time threshold and target progress */
-const STEP_TIMELINE: Array<{
-  startAt: number; // ms from job creation
-  endAt: number;
-  step: ApiProcessingStep;
-  progressStart: number;
-  progressEnd: number;
-}> = [
-  { startAt: 0, endAt: 2000, step: "analyzing_plans", progressStart: 0, progressEnd: 25 },
-  { startAt: 2000, endAt: 5000, step: "detecting_walls_and_openings", progressStart: 25, progressEnd: 50 },
-  { startAt: 5000, endAt: 8500, step: "building_3d_model", progressStart: 50, progressEnd: 80 },
-  { startAt: 8500, endAt: 10000, step: "preparing_artifacts", progressStart: 80, progressEnd: 100 },
-];
-
-const TOTAL_DURATION = 10000; // ms
-const FAIL_AT_MS = 5000; // fail at the start of step 3
-
-/** Compute current job status/progress based on elapsed time or real pipeline state */
+/**
+ * ジョブの現在の状態を返す。
+ *
+ * すべてのジョブは実際のパイプライン実行結果に基づいて状態遷移する。
+ * - queued: パイプライン実行待ち
+ * - processing: パイプライン実行中
+ * - completed: パイプライン正常完了
+ * - failed: パイプライン実行失敗（Python エラー / 入力不備 / パース失敗 等）
+ *
+ * 旧来の時間ベース疑似進捗や shouldFail による mock 失敗は廃止された。
+ */
 export function computeJobState(job: StoredJob): {
   status: ApiJobStatus;
   progress: number;
@@ -194,9 +188,8 @@ export function computeJobState(job: StoredJob): {
   completedAt: string | null;
   error: { code: string; message: string } | null;
 } {
-  // Phase 8A: パイプラインが実行された場合、実際の結果を返す
-  if (job.pipelineStatus) {
-    if (job.pipelineStatus === "completed") {
+  switch (job.pipelineStatus) {
+    case "completed":
       return {
         status: "completed",
         progress: 100,
@@ -204,82 +197,35 @@ export function computeJobState(job: StoredJob): {
         completedAt: job.completedAt ?? null,
         error: null,
       };
-    }
-    if (job.pipelineStatus === "failed") {
+
+    case "failed":
       return {
         status: "failed",
         progress: 0,
         currentStep: null,
-        completedAt: null,
+        completedAt: job.completedAt ?? null,
         error: job.pipelineError ?? { code: "UNKNOWN", message: "不明なエラー" },
       };
-    }
-    // processing
-    return {
-      status: "processing",
-      progress: 50,
-      currentStep: "detecting_walls_and_openings",
-      completedAt: null,
-      error: null,
-    };
-  }
 
-  // Legacy: 時間ベースの疑似進捗（パイプライン未実行のジョブ用）
-  const elapsed = Date.now() - job.startedAtMs;
-
-  // Fail check: if shouldFail and enough time has passed
-  if (job.shouldFail && elapsed >= FAIL_AT_MS) {
-    return {
-      status: "failed",
-      progress: 50,
-      currentStep: "detecting_walls_and_openings",
-      completedAt: null,
-      error: {
-        code: "PROCESSING_FAILED",
-        message:
-          "壁の検出に失敗しました。図面の品質を確認してください。（デモ用エラー：ファイル名に「fail」が含まれています）",
-      },
-    };
-  }
-
-  // Completed
-  if (elapsed >= TOTAL_DURATION) {
-    return {
-      status: "completed",
-      progress: 100,
-      currentStep: "preparing_artifacts",
-      completedAt: new Date(job.startedAtMs + TOTAL_DURATION).toISOString(),
-      error: null,
-    };
-  }
-
-  // Find current step based on elapsed time
-  for (const step of STEP_TIMELINE) {
-    if (elapsed >= step.startAt && elapsed < step.endAt) {
-      const stepElapsed = elapsed - step.startAt;
-      const stepDuration = step.endAt - step.startAt;
-      const ratio = stepElapsed / stepDuration;
-      const progress = Math.round(
-        step.progressStart + ratio * (step.progressEnd - step.progressStart)
-      );
+    case "processing":
       return {
         status: "processing",
-        progress,
-        currentStep: step.step,
+        progress: 50,
+        currentStep: "detecting_walls_and_openings",
         completedAt: null,
         error: null,
       };
-    }
-  }
 
-  // Fallback — should not reach here
-  return {
-    status: "queued",
-    progress: 0,
-    currentStep: null,
-    completedAt: null,
-    error: null,
-  };
+    case "queued":
+    default:
+      return {
+        status: "queued",
+        progress: 0,
+        currentStep: null,
+        completedAt: null,
+        error: null,
+      };
+  }
 }
 
 // ── Mock quantities data ──

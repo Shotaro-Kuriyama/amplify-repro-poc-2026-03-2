@@ -98,7 +98,7 @@ python3 scripts/pipeline/tests/fixtures/generate_fixtures.py
 | 高精度なドア記号認識 | 未対応。quarter-circle 簡易判定のみ |
 | IFC 生成 | 未実装。構造化 JSON のみ |
 | 複数ページ PDF | 最初のページのみ処理 |
-| floorLabel の正式接続 | サーバー側で自動採番 (フロントと未連携) |
+| floorLabel の正式接続 | フロントエンドから渡された値を使用。未指定時は自動採番 |
 | rooms の精度 | テキストブロックからの簡易抽出のみ |
 | 永続化 | in-memory のみ (数十 ms で完了するため十分) |
 
