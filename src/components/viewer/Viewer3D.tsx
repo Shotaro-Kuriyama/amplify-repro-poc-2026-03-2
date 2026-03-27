@@ -208,7 +208,14 @@ const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
 
       camera.updateProjectionMatrix();
       camera.lookAt(center);
+
+      // ダンピングを一時停止して即座にカメラを収束させる。
+      // enableDamping が有効のまま update() すると、数フレームかけて
+      // じわじわカメラが動く（ズームして見える）原因になりうる。
+      const wasDamping = controls.enableDamping;
+      controls.enableDamping = false;
       controls.update();
+      controls.enableDamping = wasDamping;
       controls.saveState();
     }, [cameraMode, sceneBounds]);
 
