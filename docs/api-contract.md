@@ -1,46 +1,65 @@
 # API Contract
 
-AmpliFy フロントエンドモックの API 契約定義。
+AmpliFy の API 契約定義。
 
-## 概要
+## 前提（現在の実装）
 
-フロントエンドは `src/lib/api/client.ts` 経由で 6 つの API 関数を呼び出します。
-現在は `mock.ts` がレスポンスを返していますが、将来は実バックエンド（FastAPI / Route Handler 等）に差し替え可能です。
+このドキュメントは、**現時点の実装**に合わせた API 契約を整理したものです。
 
-差し替え時は `client.ts` の `mockApi` を実 API 実装に置き換えるだけで、Zod による runtime validation が型安全性を担保します。
+- デフォルトは `real` モード（`NEXT_PUBLIC_API_MODE` 未指定時）
+- `real` モードでは `src/lib/api/real.ts` が Next.js Route Handlers (`/api/*`) を呼ぶ
+- Route Handlers 側は in-memory store（`src/lib/server/store.ts`）を使う擬似 backend
+- `POST /api/jobs` 後、`pipeline-runner` がバックグラウンドで Python パイプラインを実行
+- 成功時は `structured_json` と最小 `ifc` artifact が生成される
+- `mock` モードは補助的な切替モード（`src/lib/api/mock.ts` 直呼び）
+
+## 処理フロー（real モード）
+
+1. `POST /api/plans/upload` で PDF をアップロード
+2. `POST /api/jobs` で job 作成（レスポンスは `status: "queued"`）
+3. サーバー側で `executePipelineForJob(jobId)` を fire-and-forget 実行
+4. `GET /api/jobs/:jobId` を polling
+5. `completed` 時に `pipelineResult` と `artifacts` を取得
+6. 必要に応じて `GET /api/jobs/:jobId/artifacts/:format` / `.../quantities` を取得
 
 ## API 一覧
 
-### 1. uploadPlans
+フロントエンドは `src/lib/api/client.ts` 経由で次の 6 関数を呼びます。
+
+### 1. `uploadPlans`
 
 ファイルをアップロードし、サーバー割り当ての file metadata を返す。
 
 **Request:**
-```typescript
+```ts
 { files: File[] }
 ```
 
 **Response:**
-```typescript
+```ts
 {
   files: Array<{
     fileId: string;
     originalName: string;
     size: number;
     mimeType: string;
-    uploadedAt: string;  // ISO 8601
+    uploadedAt: string; // ISO 8601
   }>;
 }
 ```
 
-### 2. createAmplifyJob
+### 2. `createAmplifyJob`
 
-ファイル ID と設定をもとに変換ジョブを開始する。
+ファイル ID と設定をもとに変換ジョブを作成し、バックグラウンド実行を開始する。
 
 **Request:**
-```typescript
+```ts
 {
   fileIds: string[];
+  files?: Array<{
+    fileId: string;
+    floorLabel: string; // 例: "1F", "B1"
+  }>;
   settings: {
     scale: number;       // e.g. 100
     floorHeight: number; // meters
@@ -48,24 +67,26 @@ AmpliFy フロントエンドモックの API 契約定義。
 }
 ```
 
+`files` は `fileId` と `floorLabel` の対応を渡すためのオプション。未指定時はサーバー側で `1F, 2F, ...` を自動採番します。
+
 **Response:**
-```typescript
+```ts
 {
   jobId: string;
-  status: ApiJobStatus;  // "queued" | "processing"
+  status: ApiJobStatus; // real: "queued", mock: "processing"
   fileIds: string[];
-  createdAt: string;     // ISO 8601
+  createdAt: string;
 }
 ```
 
-### 3. getAmplifyJob
+### 3. `getAmplifyJob`
 
-ジョブの現在状態を取得する。ポーリングで使用。
+ジョブの現在状態を取得する（polling 用）。
 
 **Request:** `getAmplifyJob(jobId: string)`
 
 **Response:**
-```typescript
+```ts
 {
   jobId: string;
   status: ApiJobStatus;
@@ -76,33 +97,34 @@ AmpliFy フロントエンドモックの API 契約定義。
   error: ApiErrorPayload | null;       // failed 時のみ非 null
   createdAt: string;
   completedAt: string | null;
+  pipelineResult?: Record<string, unknown> | null;
 }
 ```
 
-### 4. downloadArtifact
+`pipelineResult` は real モードでパイプライン結果がある場合に入ります。
+
+### 4. `downloadArtifact`
 
 生成物ファイルをダウンロードする。
 
 **Request:**
-```typescript
-{ jobId: string; format: "ifc" | "rvt" | "dwg" }
+```ts
+{ jobId: string; format: "ifc" | "rvt" | "dwg" | "structured_json" }
 ```
 
 **Response:** `Blob`
 
-> **Phase 7 確定**: 案A（直接ファイルレスポンス）を採用。Route Handler が `Response` でバイナリを返し、client は `res.blob()` で受け取る。Phase 8 以降で S3 presigned URL 方式に移行する場合は、`real.ts` の `downloadArtifact` をリダイレクト or URL 返却に変更する。
-
-### 5. downloadQuantities
+### 5. `downloadQuantities`
 
 数量表データを取得する。
 
 **Request:**
-```typescript
+```ts
 { jobId: string }
 ```
 
 **Response:**
-```typescript
+```ts
 {
   rows: Array<{
     element: string;
@@ -114,12 +136,12 @@ AmpliFy フロントエンドモックの API 契約定義。
 }
 ```
 
-### 6. submitLeadForm
+### 6. `submitLeadForm`
 
 ダウンロード前のリード情報を送信する。
 
 **Request:**
-```typescript
+```ts
 {
   data: {
     name: string;
@@ -133,10 +155,10 @@ AmpliFy フロントエンドモックの API 契約定義。
 ```
 
 **Response:**
-```typescript
+```ts
 {
   submissionId: string;
-  submittedAt: string;  // ISO 8601
+  submittedAt: string;
 }
 ```
 
@@ -146,10 +168,10 @@ AmpliFy フロントエンドモックの API 契約定義。
 
 | Status | 意味 |
 |---|---|
-| `queued` | ジョブ受付済み、処理待ち |
-| `processing` | 変換処理中 |
-| `completed` | 変換完了 |
-| `failed` | 変換失敗 |
+| `queued` | ジョブ受付済み、実行待ち |
+| `processing` | パイプライン実行中 |
+| `completed` | パイプライン正常完了 |
+| `failed` | パイプライン実行失敗 |
 
 ### UI Job Status（フロントエンド概念）
 
@@ -162,51 +184,52 @@ AmpliFy フロントエンドモックの API 契約定義。
 | `completed` | 完了 | API: `completed` |
 | `failed` | 失敗 | API: `failed` |
 
-`idle`, `uploading`, `ready` はフロントエンド固有の画面状態です。
-`useAmplifyJob` フックが API status → UI status の変換を行います。
+`useAmplifyJob` が API status → UI status を変換します。
 
 ## Processing Steps
 
-API が返す `currentStep` の値:
+`currentStep` は以下の値を返します。
 
 | Step | 意味 |
 |---|---|
-| `analyzing_plans` | 図面解析 |
-| `detecting_walls_and_openings` | 壁・開口部検出 |
-| `building_3d_model` | 3Dモデル生成 |
-| `preparing_artifacts` | 出力準備 |
+| `analyzing_plans` | 入力組み立て |
+| `detecting_walls_and_openings` | Python パイプライン実行 |
+| `building_3d_model` | 最小 IFC 生成 |
+| `preparing_artifacts` | 結果確定・返却準備 |
 
 ## Error Model
 
-エラー時は `ApiErrorPayload` 形式で返却:
+エラー時は `ApiErrorPayload` 形式を返します。
 
-```typescript
+```ts
 {
-  code: string;    // 例: "PROCESSING_FAILED"
-  message: string; // 人間向けメッセージ
+  code: string;
+  message: string;
   details?: Record<string, unknown>;
 }
 ```
 
-定義済みエラーコード: `VALIDATION_ERROR`, `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `UPLOAD_FAILED`, `JOB_NOT_FOUND`, `JOB_NOT_READY`, `PROCESSING_FAILED`, `DOWNLOAD_NOT_READY`, `LEAD_SUBMISSION_FAILED`, `UNKNOWN_ERROR`
+主なエラーコード（現在実装）:
+
+- 共通系: `VALIDATION_ERROR`, `UNSUPPORTED_FILE_TYPE`, `UPLOAD_FAILED`, `JOB_NOT_FOUND`, `DOWNLOAD_NOT_READY`
+- パイプライン系: `PIPELINE_INPUT_ERROR`, `PIPELINE_EXECUTION_ERROR`, `PIPELINE_OUTPUT_PARSE_ERROR`, `PIPELINE_FAILED`, `IFC_GENERATION_ERROR`
+- artifact 系: `ARTIFACT_NOT_FOUND`, `ARTIFACT_INVALID`, `ARTIFACT_READ_ERROR`
 
 ## Runtime Validation
 
-`src/lib/api/schemas.ts` に全レスポンスの Zod スキーマが定義されています。
-`client.ts` がレスポンスを `schema.parse()` で検証するため、mock/実 API どちらでも型安全性が保証されます。
+`src/lib/api/schemas.ts` に Zod スキーマを定義し、`client.ts` でレスポンスを runtime 検証します。
 
 ## API モード
 
-`client.ts` は環境変数 `NEXT_PUBLIC_API_MODE` で API 実装を切り替えます。
+`client.ts` は `NEXT_PUBLIC_API_MODE` で実装を切り替えます。
 
 | 値 | 挙動 | 用途 |
 |---|---|---|
-| `real`（デフォルト） | `fetch` で Route Handlers (`/api/*`) を呼ぶ | 通常開発・デモ |
-| `mock` | `mock.ts` を直接呼ぶ（HTTP なし） | Phase 6 以前の動作確認・単体テスト |
+| `real`（デフォルト） | `fetch` で Route Handlers (`/api/*`) を呼ぶ | 通常開発・実パイプライン確認 |
+| `mock` | `mock.ts` を直接呼ぶ（HTTP なし） | UI 単体確認・補助デモ |
 
-切り替え方法:
 ```bash
-# real API モード（デフォルト）
+# real モード（デフォルト）
 npm run dev
 
 # mock モード
@@ -214,10 +237,6 @@ NEXT_PUBLIC_API_MODE=mock npm run dev
 ```
 
 ## Real API（Route Handlers）
-
-Phase 7 で導入された `fetch` ベースの擬似 backend です。
-
-### 構成
 
 | ルート | メソッド | 対応 API |
 |---|---|---|
@@ -228,81 +247,67 @@ Phase 7 で導入された `fetch` ベースの擬似 backend です。
 | `/api/jobs/[jobId]/quantities` | GET | downloadQuantities |
 | `/api/leads` | POST | submitLeadForm |
 
-### In-memory Store / Repository
+補足:
 
-`src/lib/server/store.ts` が擬似 backend のデータ層です。
+- `POST /api/internal/pipeline/run` は実験用 endpoint（6 API 契約の外）
+- poll 間隔は `useAmplifyJob` で 1.5 秒
 
-- `FileRepository`: アップロード済みファイルメタデータ（現在は InMemory 実装）
-- `JobRepository`: ジョブ状態（現在は InMemory 実装、作成時刻ベースで進捗を時間計算）
-- `LeadRepository`: リード送信データ（現在は InMemory 実装）
+### データ保持
 
-データはサーバー再起動で消えます（in-memory のため）。
-将来 SQLite / PostgreSQL に差し替える場合は、Repository インターフェースの別実装を作成し、シングルトンを差し替える。
+- job / file / lead メタ情報: in-memory（`src/lib/server/store.ts`）
+- アップロード実ファイル: `data/uploads/*`
+- 生成 IFC: `data/artifacts/<jobId>/model.ifc`
 
-### File Storage（Phase 7.5）
+in-memory のため、サーバー再起動でメタ情報は消えます。
 
-`src/lib/server/file-storage.ts` がアップロードされたファイル実体の保存を担当します。
+### 進捗計算（現在実装）
 
-- `FileStorage` インターフェース: `save()` / `getPath()` / `read()`
-- 現在は `LocalFileStorage`（`data/uploads/{fileId}/` に保存）
-- 将来は S3 / GCS に差し替え可能
+時間経過ベースではなく、`pipeline-runner` が更新する `pipelineStep` に応じて進捗を返します。
 
-### Job 進捗の仕組み
+| 状態/ステップ | 進捗 |
+|---|---|
+| `queued` | 5 |
+| `analyzing_plans` | 15 |
+| `detecting_walls_and_openings` | 40 |
+| `building_3d_model` | 65 |
+| `preparing_artifacts`（processing中） | 85 |
+| `completed` | 100 |
+| `failed` | 0 |
 
-ジョブ作成時に `startedAtMs`（現在時刻）を記録し、GET 時に経過時間から現在の進捗・ステップを計算します。
+### artifact / quantities の返却
 
-| 経過時間 | ステップ | 進捗 |
-|---|---|---|
-| 0–2秒 | analyzing_plans | 0→25% |
-| 2–5秒 | detecting_walls_and_openings | 25→50% |
-| 5–8.5秒 | building_3d_model | 50→80% |
-| 8.5–10秒 | preparing_artifacts | 80→100% |
+- `structured_json`: `job.pipelineOutput` があれば実データを返す
+- `ifc`: `job.pipelineOutput` 内の IFC ファイルを返す
+- `rvt` / `dwg`: 現時点ではモック返却
+- `quantities`: `pipelineOutput.stats` があれば実カウント（壁/開口部/部屋）を返す
 
-fail デモ: ファイル名に `fail` を含む場合、5秒経過時点で `PROCESSING_FAILED` を返却。
+## 失敗デモ（現在）
 
-### Polling
+real モードでは、`shouldFail` のような意図的 mock 分岐は使いません。
+失敗は実際のパイプライン実行結果に基づいて決まります。
 
-`useAmplifyJob` が 1.5 秒間隔で `GET /api/jobs/:jobId` をポーリングします。
-`completed` または `failed` を受信したらポーリングを停止します。
+代表的な再現方法:
 
-### downloadArtifact の返却方式
+- 存在しない `fileId` で `POST /api/jobs` を作成して `PIPELINE_INPUT_ERROR` を発生させる
+- Python 実行エラーや JSON パース失敗を誘発して `PIPELINE_EXECUTION_ERROR` / `PIPELINE_OUTPUT_PARSE_ERROR` を確認する
 
-**案A（直接ファイルレスポンス）** を採用。Route Handler が `Response` で直接ファイルを返し、client は `res.blob()` で受け取ります。
-
-### Request Validation
-
-JSON body を持つエンドポイント（`/api/jobs`, `/api/leads`）は Zod で入力を検証し、不正入力には `VALIDATION_ERROR` を返します。ジョブ未存在時は `JOB_NOT_FOUND`（404）、未完了ジョブへのダウンロード要求には `DOWNLOAD_NOT_READY`（409）を返します。
+具体的な手順は `docs/phase8a-quickstart.md` を参照してください。
 
 ## Mock の役割
 
-`src/lib/api/mock.ts` は API 契約に準拠したリファレンス実装です。
+`src/lib/api/mock.ts` は API 契約準拠の補助実装です。
 
-- `setTimeout` で非同期遅延をシミュレーション
-- ファイル名に `fail` を含むと `PROCESSING_FAILED` を再現
-- Per-job 状態管理（グローバル状態漏れなし）
-- `NEXT_PUBLIC_API_MODE=mock` で有効化
+- HTTP なしで API 応答を再現
+- `setTimeout` による擬似遅延
+- `shouldFail`（ファイル名に `fail`）は **mock モードのみ** で有効
 
-## Phase 8A で接続予定のポイント
+`mock` は UI 作業や軽量確認向けで、デフォルト運用は `real` を前提とします。
 
-Phase 8A（ルールベース PDF 処理）に進む際、現行 API 契約に対して以下の接続・拡張が必要になる見込み。
+## 将来拡張（現時点では未実装）
 
-### 1. floorLabel のサーバー側受け渡し
+ここから先は将来案です。上記の「現在の実装」と混同しないでください。
 
-`PipelineInput`（`src/types/pipeline.ts`）は各ファイルに `floorLabel`（"1F", "B1" 等）を必要とするが、現在この情報はフロントエンド（`useFileUpload.ts`）にしか存在しない。
-
-`createAmplifyJob` の request を拡張して、`fileIds` と対応する `floorLabel` を渡す形が最もシンプルだが、API 契約変更になるため着手時に判断する。
-
-### 2. 実際の処理結果の返却
-
-現在の `getAmplifyJob` と `downloadArtifact` / `downloadQuantities` はモックデータを返しているが、Phase 8A 以降は Worker が生成した実データをストレージ / DB から読み出して返す形に変わる。
-
-API レスポンスの shape 自体は変更不要（現行契約のまま使える）。
-
-## Phase 8 以降での差し替え手順
-
-1. FastAPI 等で同じ REST API を実装する（同じレスポンス shape に準拠）
-2. `NEXT_PUBLIC_API_URL` を外部サーバーの URL に設定する（例: `http://localhost:8000/api`）
-3. Route Handlers を削除するか、プロキシに変換する
-4. `real.ts` の `fetch` ロジックはそのまま使える
-5. Zod validation が自動的にレスポンスを検証する
-6. `useAmplifyJob` の adapter 層が API → UI の変換を引き続き担当する
+1. 外部 API サーバー（FastAPI など）へ切り替える
+2. `NEXT_PUBLIC_API_URL` を外部 URL に設定する
+3. Route Handlers を削除またはプロキシ化する
+4. store / file storage を DB + object storage 実装に差し替える

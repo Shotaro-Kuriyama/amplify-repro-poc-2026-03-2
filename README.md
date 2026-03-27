@@ -1,6 +1,7 @@
 # AmpliFy Mock
 
-建築平面図（PDF）をAIでBIM 3Dモデル（IFC・RVT・DWG）に変換するWebアプリ **AmpliFy** のフロントエンドモックです。
+建築平面図（PDF）をAIでBIM 3Dモデル（IFC・RVT・DWG）に変換するWebアプリ **AmpliFy** の PoC リポジトリです。  
+静的なフロントエンドモックだけでなく、Next.js Route Handlers（擬似 backend）と Python パイプライン接続を含む最小縦切りを実装しています。
 
 ## セットアップ
 
