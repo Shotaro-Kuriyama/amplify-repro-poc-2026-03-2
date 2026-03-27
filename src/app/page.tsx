@@ -49,7 +49,6 @@ function AppContent() {
   // File management
   const {
     files,
-    fileIds,
     isUploading,
     addFiles,
     removeFile,
