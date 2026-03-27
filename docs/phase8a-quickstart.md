@@ -71,11 +71,13 @@ curl -X POST http://localhost:3000/api/jobs \
 ```json
 {
   "jobId": "job-1711234567890",
-  "status": "processing",
+  "status": "queued",
   "fileIds": ["file-1711234567890-0"],
   "createdAt": "2026-03-26T..."
 }
 ```
+
+ジョブ作成直後は `queued` 状態です。バックグラウンドで pipeline-runner が `queued` → `processing` → `completed` / `failed` と遷移させます。
 
 ### Step 3: ジョブ状態を確認（数秒後に completed になる）
 

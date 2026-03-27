@@ -117,7 +117,7 @@ Phase 8    PDF→BIM の技術検証
 主な内容:
 - `real.ts`: fetch ベースの API クライアント
 - 6 本の Route Handlers（`/api/*`）
-- in-memory store（時間ベースの job 進捗計算）
+- in-memory store（Phase 8A 以降はパイプライン実行結果ベースの状態管理）
 - 1.5 秒固定間隔 polling
 - `NEXT_PUBLIC_API_MODE` による mock/real 切替
 - JSON body を中心とした request validation（Zod）

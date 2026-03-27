@@ -40,6 +40,9 @@
 - `type: "door" | "window" | "unknown"` の分類
 - door / window の重複回避
 - `POST /api/internal/pipeline/run` は Phase 8A 検証用の internal endpoint であり、既存の 6 API 契約とは別枠
+- `POST /api/jobs` でジョブ作成 → Python パイプライン自動実行 → 結果を API で返却の縦切り接続
+- floorLabel がフロントエンドからサーバーに渡り、PipelineInput に反映される
+- ジョブの成功/失敗はすべて実パイプライン実行結果に基づく（mock 失敗は廃止）
 
 ### 未完了
 - 斜め壁・曲線壁の検出
@@ -48,7 +51,6 @@
 - IFC 生成 (構造化 JSON のみ)
 - 複数ページ PDF 対応
 - rooms の高精度抽出
-- floorLabel のフロントエンド連携
 
 ---
 
