@@ -53,45 +53,38 @@ export async function executePipelineForJob(jobId: string): Promise<void> {
     return;
   }
 
-  // processing に更新
+  // ── ステップ 1: analyzing_plans — 入力組み立て ──
   job.pipelineStatus = "processing";
+  job.pipelineStep = "analyzing_plans";
   storeJob(job);
 
-  // Step 1: PipelineInput を組み立てる
-  // ファイルが見つからない / filePath がないなどは PIPELINE_INPUT_ERROR になる
   let input;
   try {
     input = buildPipelineInput(jobId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "PipelineInput の組み立てに失敗しました";
-    const updatedJob = getJob(jobId);
-    if (!updatedJob) return;
-
-    updatedJob.pipelineStatus = "failed";
-    updatedJob.pipelineError = {
-      code: "PIPELINE_INPUT_ERROR",
-      message,
-    };
-    updatedJob.completedAt = new Date().toISOString();
-    storeJob(updatedJob);
-
+    job.pipelineStatus = "failed";
+    job.pipelineError = { code: "PIPELINE_INPUT_ERROR", message };
+    job.completedAt = new Date().toISOString();
+    storeJob(job);
     console.error(`[pipeline-runner] Job ${jobId} input error:`, message);
     return;
   }
 
-  // Step 2: Python を実行する
+  // ── ステップ 2: detecting_walls_and_openings — Python 実行 ──
+  job.pipelineStep = "detecting_walls_and_openings";
+  storeJob(job);
+
   try {
     const output = await runPipeline(input);
 
-    // 結果を保存
-    const updatedJob = getJob(jobId);
-    if (!updatedJob) return;
-
     if (output.success) {
-      // 成功: completed
-      updatedJob.pipelineStatus = "completed";
-      updatedJob.pipelineOutput = output;
-      updatedJob.completedAt = new Date().toISOString();
+      // ── ステップ 3: preparing_artifacts → completed ──
+      job.pipelineStep = "preparing_artifacts";
+      job.pipelineStatus = "completed";
+      job.pipelineOutput = output;
+      job.completedAt = new Date().toISOString();
+      storeJob(job);
 
       console.log(
         `[pipeline-runner] Job ${jobId} completed:`,
@@ -102,32 +95,29 @@ export async function executePipelineForJob(jobId: string): Promise<void> {
       );
     } else {
       // Python が success: false を返した
-      updatedJob.pipelineStatus = "failed";
-      updatedJob.pipelineOutput = output;
-      updatedJob.pipelineError = {
+      job.pipelineStatus = "failed";
+      job.pipelineOutput = output;
+      job.pipelineError = {
         code: output.error?.code ?? "PIPELINE_FAILED",
         message: output.error?.message ?? "パイプライン処理が失敗しました",
       };
-      updatedJob.completedAt = new Date().toISOString();
+      job.completedAt = new Date().toISOString();
+      storeJob(job);
 
       console.error(
         `[pipeline-runner] Job ${jobId} failed (Python returned success=false):`,
-        updatedJob.pipelineError.message
+        job.pipelineError.message
       );
     }
-    storeJob(updatedJob);
   } catch (err) {
     // Python プロセス起動失敗 / non-zero 終了 / JSON パース失敗
-    const updatedJob = getJob(jobId);
-    if (!updatedJob) return;
-
     const message = err instanceof Error ? err.message : "パイプライン処理中に不明なエラーが発生しました";
     const code = classifyPipelineError(message);
 
-    updatedJob.pipelineStatus = "failed";
-    updatedJob.pipelineError = { code, message };
-    updatedJob.completedAt = new Date().toISOString();
-    storeJob(updatedJob);
+    job.pipelineStatus = "failed";
+    job.pipelineError = { code, message };
+    job.completedAt = new Date().toISOString();
+    storeJob(job);
 
     console.error(`[pipeline-runner] Job ${jobId} ${code}:`, message);
   }

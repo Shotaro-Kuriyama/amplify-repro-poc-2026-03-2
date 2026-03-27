@@ -154,6 +154,18 @@ const en: Dictionary = {
       companyRequired: "Company name is required",
     },
   },
+  pipelineResult: {
+    title: "Analysis Summary",
+    walls: "Walls",
+    openings: "Openings",
+    rooms: "Rooms",
+    floor: "Floor",
+    sourceInfo: "Drawing Size",
+    duration: "Processing Time",
+    errorTitle: "Error Details",
+    unknownError: "An unknown error occurred",
+    errorCode: "Error Code",
+  },
   status: {
     idle: "Idle",
     uploading: "Uploading",

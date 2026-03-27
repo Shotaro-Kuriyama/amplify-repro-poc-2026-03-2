@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AmplifyJob, ConversionSettings, JobArtifact, JobStatus } from "@/types";
+import type { AmplifyJob, ConversionSettings, JobArtifact, JobStatus, PipelineResultSummary } from "@/types";
 import type { ApiJobStatus, ApiProcessingStep, GetJobResponse } from "@/lib/api/types";
 import { api } from "@/lib/api/client";
 import { normalizeError } from "@/lib/api/errors";
@@ -31,10 +31,44 @@ const STEP_INDEX_MAP: Record<ApiProcessingStep, number> = {
   preparing_artifacts: 3,
 };
 
-/** Map a GetJobResponse to UI-facing AmplifyJob + artifacts */
+/**
+ * Phase 8A: API の pipelineResult (Record<string, unknown>) を
+ * UI 用の PipelineResultSummary に変換する。
+ */
+function parsePipelineResult(raw: Record<string, unknown>): PipelineResultSummary | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = raw as any;
+    return {
+      success: !!data.success,
+      floors: (Array.isArray(data.floors) ? data.floors : []).map(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (f: any) => ({
+          floorLabel: f.floorLabel ?? "",
+          wallCount: Array.isArray(f.walls) ? f.walls.length : 0,
+          openingCount: Array.isArray(f.openings) ? f.openings.length : 0,
+          roomCount: Array.isArray(f.rooms) ? f.rooms.length : 0,
+          pageWidth: f.source?.pageWidth ?? 0,
+          pageHeight: f.source?.pageHeight ?? 0,
+        })
+      ),
+      stats: {
+        totalWalls: data.stats?.totalWalls ?? 0,
+        totalOpenings: data.stats?.totalOpenings ?? 0,
+        totalRooms: data.stats?.totalRooms ?? 0,
+        durationMs: data.stats?.durationMs ?? 0,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Map a GetJobResponse to UI-facing AmplifyJob + artifacts + pipelineResult */
 function mapGetJobResponse(res: GetJobResponse): {
   job: AmplifyJob;
   artifacts: JobArtifact[];
+  pipelineResult: PipelineResultSummary | null;
 } {
   const stepIndex = res.currentStep
     ? STEP_INDEX_MAP[res.currentStep]
@@ -50,8 +84,12 @@ function mapGetJobResponse(res: GetJobResponse): {
       createdAt: res.createdAt,
       completedAt: res.completedAt ?? undefined,
       error: res.error?.message,
+      errorCode: res.error?.code,
     },
     artifacts: res.artifacts ?? [],
+    pipelineResult: res.pipelineResult
+      ? parsePipelineResult(res.pipelineResult)
+      : null,
   };
 }
 
@@ -68,6 +106,10 @@ interface UseAmplifyJobReturn {
   job: AmplifyJob | null;
   artifacts: JobArtifact[];
   error: string | null;
+  /** Phase 8A: エラーコード（failed 時） */
+  errorCode: string | null;
+  /** Phase 8A: パイプライン結果サマリー（completed 時） */
+  pipelineResult: PipelineResultSummary | null;
   /** Phase 8A: files に fileId + floorLabel の対応を渡す */
   startConversion: (files: FileEntry[], settings: ConversionSettings) => Promise<void>;
   reset: () => void;
@@ -78,6 +120,8 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
   const [job, setJob] = useState<AmplifyJob | null>(null);
   const [artifacts, setArtifacts] = useState<JobArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [pipelineResult, setPipelineResult] = useState<PipelineResultSummary | null>(null);
 
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollFnRef = useRef<((jobId: string) => void) | null>(null);
@@ -100,12 +144,14 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
         if (res.status === "completed") {
           setStatus("completed");
           setArtifacts(mapped.artifacts);
+          setPipelineResult(mapped.pipelineResult);
           return;
         }
 
         if (res.status === "failed") {
           setStatus("failed");
           setError(res.error?.message ?? "変換中にエラーが発生しました");
+          setErrorCode(res.error?.code ?? null);
           return;
         }
 
@@ -126,7 +172,9 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
       stopPolling();
       setStatus("processing");
       setError(null);
+      setErrorCode(null);
       setArtifacts([]);
+      setPipelineResult(null);
 
       try {
         // Phase 8A: fileId と floorLabel の対応を API に渡す
@@ -170,6 +218,8 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
     setJob(null);
     setArtifacts([]);
     setError(null);
+    setErrorCode(null);
+    setPipelineResult(null);
   }, [stopPolling]);
 
   // Cleanup on unmount
@@ -177,5 +227,5 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
     return () => stopPolling();
   }, [stopPolling]);
 
-  return { status, job, artifacts, error, startConversion, reset };
+  return { status, job, artifacts, error, errorCode, pipelineResult, startConversion, reset };
 }

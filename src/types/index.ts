@@ -35,6 +35,27 @@ export interface AmplifyJob {
   createdAt: string;
   completedAt?: string;
   error?: string;
+  /** Phase 8A: エラーコード（failed 時） */
+  errorCode?: string;
+}
+
+// ── Pipeline result summary (Phase 8A UI 表示用) ──
+export interface PipelineResultSummary {
+  success: boolean;
+  floors: Array<{
+    floorLabel: string;
+    wallCount: number;
+    openingCount: number;
+    roomCount: number;
+    pageWidth: number;
+    pageHeight: number;
+  }>;
+  stats: {
+    totalWalls: number;
+    totalOpenings: number;
+    totalRooms: number;
+    durationMs: number;
+  };
 }
 
 // ── Artifacts ──

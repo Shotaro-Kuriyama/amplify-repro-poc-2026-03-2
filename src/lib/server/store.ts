@@ -65,6 +65,11 @@ export interface StoredJob {
   pipelineOutput?: PipelineOutput;
   /** パイプライン実行エラー（失敗時） */
   pipelineError?: { code: string; message: string };
+  /**
+   * パイプライン実行中の現在ステップ（段階的進捗表示用）。
+   * pipeline-runner.ts が各段階で更新する。
+   */
+  pipelineStep?: ApiProcessingStep;
   /** 完了日時（completed / failed 時に設定） */
   completedAt?: string;
 }
@@ -207,21 +212,30 @@ export function computeJobState(job: StoredJob): {
         error: job.pipelineError ?? { code: "UNKNOWN", message: "不明なエラー" },
       };
 
-    case "processing":
+    case "processing": {
+      // pipelineStep に応じて段階的に進捗を表示する
+      const stepProgress: Record<string, number> = {
+        analyzing_plans: 15,
+        detecting_walls_and_openings: 40,
+        building_3d_model: 65,
+        preparing_artifacts: 85,
+      };
+      const step = job.pipelineStep ?? "analyzing_plans";
       return {
         status: "processing",
-        progress: 50,
-        currentStep: "detecting_walls_and_openings",
+        progress: stepProgress[step] ?? 25,
+        currentStep: step,
         completedAt: null,
         error: null,
       };
+    }
 
     case "queued":
     default:
       return {
         status: "queued",
-        progress: 0,
-        currentStep: null,
+        progress: 5,
+        currentStep: "analyzing_plans",
         completedAt: null,
         error: null,
       };

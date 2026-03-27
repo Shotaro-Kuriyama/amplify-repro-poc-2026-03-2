@@ -21,6 +21,7 @@ import { StoryManager } from "@/components/multi-story/StoryManager";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { Viewer3D } from "@/components/viewer/Viewer3D";
 import { DownloadModal } from "@/components/download/DownloadModal";
+import { PipelineResultCard, PipelineErrorCard } from "@/components/pipeline/PipelineResultCard";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -59,7 +60,7 @@ function AppContent() {
   } = useFileUpload();
 
   // Job state
-  const { status: jobStatus, job, artifacts, error, startConversion, reset } =
+  const { status: jobStatus, job, artifacts, error, errorCode, pipelineResult, startConversion, reset } =
     useAmplifyJob();
 
   // Start floor for multi-storey
@@ -324,6 +325,20 @@ function AppContent() {
               error={error}
             />
           </div>
+
+          {/* Phase 8A: パイプライン結果サマリー（completed 時） */}
+          {isCompleted && pipelineResult && (
+            <div className="mt-3">
+              <PipelineResultCard result={pipelineResult} />
+            </div>
+          )}
+
+          {/* Phase 8A: エラー詳細（failed 時） */}
+          {isFailed && (
+            <div className="mt-3">
+              <PipelineErrorCard errorCode={errorCode} errorMessage={error} />
+            </div>
+          )}
         </main>
       </div>
 

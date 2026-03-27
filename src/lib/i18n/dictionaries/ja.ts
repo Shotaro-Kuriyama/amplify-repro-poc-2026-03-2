@@ -152,6 +152,18 @@ const ja = {
       companyRequired: "会社・組織名を入力してください",
     },
   },
+  pipelineResult: {
+    title: "解析結果サマリー",
+    walls: "壁数",
+    openings: "開口部数",
+    rooms: "部屋数",
+    floor: "階",
+    sourceInfo: "図面サイズ",
+    duration: "処理時間",
+    errorTitle: "エラー詳細",
+    unknownError: "不明なエラーが発生しました",
+    errorCode: "エラーコード",
+  },
   status: {
     idle: "待機中",
     uploading: "アップロード中",
