@@ -29,6 +29,7 @@
   - `pipelineResult`（サマリー）と `pipelineModel`（viewer 用）を保持
 - `src/components/viewer/Viewer3D.tsx`
   - 状態別 UI（processing/completed/failed）
+  - pipeline 座標（paper mm）を `settings.scale` で world m に変換して bounds を算出
   - モデル bounds からカメラ fit を安定化
 - `src/components/viewer/BuildingModel.tsx`
   - `pipelineModel` から壁・開口部の簡易 3D を生成

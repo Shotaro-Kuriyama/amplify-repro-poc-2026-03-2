@@ -49,24 +49,37 @@ interface SceneContentProps {
   floors: number;
   floorHeight: number;
   opacity: number;
+  scale: number;
   cameraMode: "perspective" | "orthographic";
   pipelineModel?: PipelineViewerModel | null;
   sceneBounds: SceneBounds;
-  fitKey: string;
 }
 
-function toCenteredX(xInMillimeters: number, pageWidthInMillimeters: number): number {
-  return xInMillimeters / 1000 - pageWidthInMillimeters / 2000;
+function toWorldMeters(paperMillimeters: number, scale: number): number {
+  return (paperMillimeters * Math.max(scale, 1)) / 1000;
 }
 
-function toCenteredZ(yInMillimeters: number, pageHeightInMillimeters: number): number {
-  return -(yInMillimeters / 1000 - pageHeightInMillimeters / 2000);
+function toCenteredX(
+  xInPaperMillimeters: number,
+  pageWidthInPaperMillimeters: number,
+  scale: number
+): number {
+  return toWorldMeters(xInPaperMillimeters, scale) - toWorldMeters(pageWidthInPaperMillimeters, scale) / 2;
+}
+
+function toCenteredZ(
+  yInPaperMillimeters: number,
+  pageHeightInPaperMillimeters: number,
+  scale: number
+): number {
+  return -(toWorldMeters(yInPaperMillimeters, scale) - toWorldMeters(pageHeightInPaperMillimeters, scale) / 2);
 }
 
 function computeSceneBounds(
   pipelineModel: PipelineViewerModel | null | undefined,
   floors: number,
-  floorHeight: number
+  floorHeight: number,
+  scale: number
 ): SceneBounds {
   if (!pipelineModel || pipelineModel.floors.length === 0) {
     const totalHeight = Math.max(floors, 1) * floorHeight;
@@ -89,8 +102,8 @@ function computeSceneBounds(
 
   pipelineModel.floors.forEach((floor, floorIndex) => {
     const baseY = floorIndex * floorHeight;
-    const halfWidth = floor.pageWidth / 2000;
-    const halfHeight = floor.pageHeight / 2000;
+    const halfWidth = toWorldMeters(floor.pageWidth, scale) / 2;
+    const halfHeight = toWorldMeters(floor.pageHeight, scale) / 2;
 
     minX = Math.min(minX, -halfWidth);
     maxX = Math.max(maxX, halfWidth);
@@ -98,11 +111,11 @@ function computeSceneBounds(
     maxZ = Math.max(maxZ, halfHeight);
 
     floor.walls.forEach((wall) => {
-      const startX = toCenteredX(wall.startX, floor.pageWidth);
-      const startZ = toCenteredZ(wall.startY, floor.pageHeight);
-      const endX = toCenteredX(wall.endX, floor.pageWidth);
-      const endZ = toCenteredZ(wall.endY, floor.pageHeight);
-      const margin = Math.max(wall.thickness / 1000, 0.05) / 2;
+      const startX = toCenteredX(wall.startX, floor.pageWidth, scale);
+      const startZ = toCenteredZ(wall.startY, floor.pageHeight, scale);
+      const endX = toCenteredX(wall.endX, floor.pageWidth, scale);
+      const endZ = toCenteredZ(wall.endY, floor.pageHeight, scale);
+      const margin = Math.max(toWorldMeters(wall.thickness, scale), 0.05) / 2;
 
       minX = Math.min(minX, startX - margin, endX - margin);
       maxX = Math.max(maxX, startX + margin, endX + margin);
@@ -111,9 +124,9 @@ function computeSceneBounds(
     });
 
     floor.openings.forEach((opening) => {
-      const centerX = toCenteredX(opening.centerX, floor.pageWidth);
-      const centerZ = toCenteredZ(opening.centerY, floor.pageHeight);
-      const width = Math.max(opening.width / 1000, 0.5);
+      const centerX = toCenteredX(opening.centerX, floor.pageWidth, scale);
+      const centerZ = toCenteredZ(opening.centerY, floor.pageHeight, scale);
+      const width = Math.max(toWorldMeters(opening.width, scale), 0.2);
       const depth = 0.06;
 
       minX = Math.min(minX, centerX - width / 2);
@@ -149,13 +162,12 @@ function computeSceneBounds(
 
 const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
   function SceneContent(
-    { floors, floorHeight, opacity, cameraMode, pipelineModel, sceneBounds, fitKey },
+    { floors, floorHeight, opacity, scale, cameraMode, pipelineModel, sceneBounds },
     ref
   ) {
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const perspectiveCameraRef = useRef<THREE.PerspectiveCamera>(null);
     const orthographicCameraRef = useRef<THREE.OrthographicCamera>(null);
-    const lastFitSignatureRef = useRef<string>("");
 
     const fitCameraToBounds = useCallback(() => {
       const controls = controlsRef.current;
@@ -207,11 +219,8 @@ const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
     }));
 
     useEffect(() => {
-      const signature = `${fitKey}:${cameraMode}`;
-      if (lastFitSignatureRef.current === signature) return;
-      lastFitSignatureRef.current = signature;
       fitCameraToBounds();
-    }, [fitKey, cameraMode, fitCameraToBounds]);
+    }, [fitCameraToBounds]);
 
     return (
       <>
@@ -269,6 +278,7 @@ const SceneContent = forwardRef<SceneHandle, SceneContentProps>(
           floors={floors}
           floorHeight={floorHeight}
           planOpacity={opacity}
+          scale={scale}
           pipelineModel={pipelineModel}
         />
       </>
@@ -311,17 +321,9 @@ export function Viewer3D({
   }, [resetViewTrigger]);
 
   const sceneBounds = useMemo(
-    () => computeSceneBounds(pipelineModel, floors, settings.floorHeight),
-    [pipelineModel, floors, settings.floorHeight]
+    () => computeSceneBounds(pipelineModel, floors, settings.floorHeight, settings.scale),
+    [pipelineModel, floors, settings.floorHeight, settings.scale]
   );
-
-  const fitKey = useMemo(() => {
-    if (!pipelineModel) return `fallback:${floors}`;
-    const signature = pipelineModel.floors
-      .map((floor) => `${floor.floorLabel}:${floor.walls.length}:${floor.openings.length}:${floor.pageWidth}x${floor.pageHeight}`)
-      .join("|");
-    return `${signature}:${pipelineModel.stats.totalWalls}:${pipelineModel.stats.totalOpenings}:${pipelineModel.stats.durationMs}`;
-  }, [pipelineModel, floors]);
 
   const showModel = status === "completed";
   const showProcessing = status === "processing";
@@ -342,10 +344,10 @@ export function Viewer3D({
               floors={floors}
               floorHeight={settings.floorHeight}
               opacity={settings.opacity}
+              scale={settings.scale}
               cameraMode={settings.cameraMode}
               pipelineModel={pipelineModel}
               sceneBounds={sceneBounds}
-              fitKey={fitKey}
             />
           </Canvas>
           <ViewerControls

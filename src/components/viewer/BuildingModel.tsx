@@ -6,24 +6,38 @@ interface BuildingModelProps {
   floors?: number;
   floorHeight?: number;
   planOpacity?: number;
+  scale?: number;
   pipelineModel?: PipelineViewerModel | null;
 }
 
 const SLAB_THICKNESS = 0.08;
 
-function toCenteredX(xInMillimeters: number, pageWidthInMillimeters: number): number {
-  return xInMillimeters / 1000 - pageWidthInMillimeters / 2000;
+function toWorldMeters(paperMillimeters: number, scale: number): number {
+  return (paperMillimeters * Math.max(scale, 1)) / 1000;
 }
 
-function toCenteredZ(yInMillimeters: number, pageHeightInMillimeters: number): number {
-  return -(yInMillimeters / 1000 - pageHeightInMillimeters / 2000);
+function toCenteredX(
+  xInPaperMillimeters: number,
+  pageWidthInPaperMillimeters: number,
+  scale: number
+): number {
+  return toWorldMeters(xInPaperMillimeters, scale) - toWorldMeters(pageWidthInPaperMillimeters, scale) / 2;
+}
+
+function toCenteredZ(
+  yInPaperMillimeters: number,
+  pageHeightInPaperMillimeters: number,
+  scale: number
+): number {
+  return -(toWorldMeters(yInPaperMillimeters, scale) - toWorldMeters(pageHeightInPaperMillimeters, scale) / 2);
 }
 
 function renderPipelineFloor(
   floor: PipelineViewerFloor,
   floorIndex: number,
   floorHeight: number,
-  planOpacity: number
+  planOpacity: number,
+  scale: number
 ) {
   const wallColor = "#cbd5e1";
   const floorColor = "#f8fafc";
@@ -31,8 +45,8 @@ function renderPipelineFloor(
   const doorColor = "#f59e0b";
   const unknownColor = "#a78bfa";
 
-  const pageWidth = Math.max(floor.pageWidth / 1000, 2);
-  const pageHeight = Math.max(floor.pageHeight / 1000, 2);
+  const pageWidth = Math.max(toWorldMeters(floor.pageWidth, scale), 0.5);
+  const pageHeight = Math.max(toWorldMeters(floor.pageHeight, scale), 0.5);
   const wallHeight = Math.max(floorHeight - SLAB_THICKNESS, 0.2);
   const baseY = floorIndex * floorHeight;
 
@@ -44,17 +58,17 @@ function renderPipelineFloor(
       </mesh>
 
       {floor.walls.map((wall, wallIndex) => {
-        const startX = toCenteredX(wall.startX, floor.pageWidth);
-        const startZ = toCenteredZ(wall.startY, floor.pageHeight);
-        const endX = toCenteredX(wall.endX, floor.pageWidth);
-        const endZ = toCenteredZ(wall.endY, floor.pageHeight);
+        const startX = toCenteredX(wall.startX, floor.pageWidth, scale);
+        const startZ = toCenteredZ(wall.startY, floor.pageHeight, scale);
+        const endX = toCenteredX(wall.endX, floor.pageWidth, scale);
+        const endZ = toCenteredZ(wall.endY, floor.pageHeight, scale);
 
         const deltaX = endX - startX;
         const deltaZ = endZ - startZ;
         const length = Math.hypot(deltaX, deltaZ);
         if (length < 0.03) return null;
 
-        const thickness = Math.max(wall.thickness / 1000, 0.05);
+        const thickness = Math.max(toWorldMeters(wall.thickness, scale), 0.05);
         const centerX = (startX + endX) / 2;
         const centerZ = (startZ + endZ) / 2;
         const rotationY = Math.atan2(deltaZ, deltaX);
@@ -73,10 +87,10 @@ function renderPipelineFloor(
       })}
 
       {floor.openings.map((opening, openingIndex) => {
-        const centerX = toCenteredX(opening.centerX, floor.pageWidth);
-        const centerZ = toCenteredZ(opening.centerY, floor.pageHeight);
-        const width = Math.max(opening.width / 1000, 0.5);
-        const height = Math.min(Math.max(opening.height / 1000, 0.8), wallHeight - 0.1);
+        const centerX = toCenteredX(opening.centerX, floor.pageWidth, scale);
+        const centerZ = toCenteredZ(opening.centerY, floor.pageHeight, scale);
+        const width = Math.max(toWorldMeters(opening.width, scale), 0.2);
+        const height = Math.min(Math.max(toWorldMeters(opening.height, scale), 0.8), wallHeight - 0.1);
         const depth = 0.06;
 
         const color = opening.type === "window"
@@ -157,6 +171,7 @@ export function BuildingModel({
   floors = 1,
   floorHeight = 2.8,
   planOpacity = 0.7,
+  scale = 50,
   pipelineModel,
 }: BuildingModelProps) {
   const hasPipelineFloors = !!pipelineModel && pipelineModel.floors.length > 0;
@@ -174,7 +189,7 @@ export function BuildingModel({
   return (
     <group>
       {pipelineModel.floors.map((floor, floorIndex) =>
-        renderPipelineFloor(floor, floorIndex, floorHeight, planOpacity)
+        renderPipelineFloor(floor, floorIndex, floorHeight, planOpacity, scale)
       )}
     </group>
   );
