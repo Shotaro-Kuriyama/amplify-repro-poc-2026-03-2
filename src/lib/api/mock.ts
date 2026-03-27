@@ -116,7 +116,7 @@ export const mockApi: AmplifyAPI = {
 
     return {
       jobId,
-      status: "processing" as ApiJobStatus,
+      status: "queued" as ApiJobStatus,
       fileIds: req.fileIds,
       createdAt: now,
     };

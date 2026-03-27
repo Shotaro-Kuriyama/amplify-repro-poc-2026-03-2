@@ -4,11 +4,11 @@
  * PDF → 構造化データ → IFC 生成 の流れにおける
  * 最小の入力・中間表現・出力の型を定義する。
  *
- * 現時点では型定義のみ。実装は Phase 8A で行う。
- * ここで定義した型は、以下の境界を明確にするために使う:
- * - Route Handler が Worker に渡す入力
- * - Worker が返す出力
- * - 将来の Python Worker との JSON 契約
+ * これらの型は以下の境界で使われている:
+ * - pipeline.ts: buildPipelineInput() が PipelineInput を組み立てる
+ * - pipeline.ts: runPipeline() が Python に PipelineInput を渡し、PipelineOutput を受け取る
+ * - pipeline-runner.ts: ジョブ状態遷移と PipelineOutput の保存
+ * - ifc-generator.ts: PipelineOutput の floors から最小 IFC を生成
  */
 
 // ═══════════════════════════════════════════════════════════
@@ -18,16 +18,8 @@
 /**
  * 1枚の PDF を処理するための最小入力。
  *
- * Phase 8A で Route Handler（または将来の API Server）が Worker に渡すデータ。
- *
- * 現行 API との接続状況:
- * - jobId: StoredJob.jobId から取得可能 ✓
- * - files[].fileId: StoredJob.fileIds から取得可能 ✓
- * - files[].filePath: StoredFile.filePath から取得可能 ✓
- * - files[].originalName: StoredFile.originalName から取得可能 ✓
- * - files[].floorLabel: 現在サーバー側に未保持（TODO: Phase 8A で接続）
- * - settings.scale: StoredJob.scale から取得可能 ✓
- * - settings.floorHeight: StoredJob.floorHeight から取得可能 ✓
+ * pipeline.ts の buildPipelineInput() が StoredJob + StoredFile から構築する。
+ * すべてのフィールドは現行 API で接続済み。
  */
 export interface PipelineInput {
   /** ジョブ ID */
@@ -52,12 +44,8 @@ export interface PipelineFileEntry {
   /**
    * 階数ラベル（例: "1F", "B1"）。
    *
-   * Phase 8A で接続済み:
-   * - createAmplifyJob の request.files[] に floorLabel を渡す形で実装（案1を採用）
-   * - フロントエンドの useFileUpload.ts から label を取得し、
-   *   useAmplifyJob.ts 経由で POST /api/jobs に送信する
-   * - サーバー側は StoredJob.floorLabels に保存し、pipeline.ts で PipelineInput に組み込む
-   * - files が未指定の場合は 1F, 2F... と自動採番にフォールバック
+   * フロントエンドから POST /api/jobs の request.files[] 経由で渡される。
+   * 未指定時は pipeline.ts 側で 1F, 2F... と自動採番にフォールバックする。
    */
   floorLabel: string;
 }
@@ -72,7 +60,7 @@ export interface PipelineSettings {
 
 // ═══════════════════════════════════════════════════════════
 // 中間表現 — PDF から抽出した構造化データ
-// Phase 8A のルールベース処理で生成する
+// Python (extract_pdf.py) のルールベース処理で生成される
 // ═══════════════════════════════════════════════════════════
 
 /** PDF から抽出した構造化データ（1階分） */
