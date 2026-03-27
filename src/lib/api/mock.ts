@@ -104,6 +104,7 @@ export const mockApi: AmplifyAPI = {
       return meta ? meta.originalName.toLowerCase().includes("fail") : false;
     });
 
+    // Phase 8A: req.files は mock モードでは無視する（パイプライン未実行のため）
     const state: MockJobState = {
       progress: 0,
       stepIndex: 0,

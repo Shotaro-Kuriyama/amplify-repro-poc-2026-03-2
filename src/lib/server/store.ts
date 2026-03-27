@@ -14,6 +14,7 @@
  */
 
 import type { ApiJobStatus, ApiProcessingStep } from "@/lib/api/types";
+import type { PipelineOutput } from "@/types/pipeline";
 
 // ═══════════════════════════════════════════════════════════
 // Repository interfaces — 永続化の境界
@@ -47,6 +48,24 @@ export interface StoredJob {
   floorHeight: number;
   createdAt: string;
   startedAtMs: number; // Date.now() when created — used for time-based progression
+  /**
+   * Phase 8A: fileId → floorLabel の対応。
+   * フロントエンドから渡された階ラベル情報を保持する。
+   * 未指定時は pipeline.ts 側で自動採番する。
+   */
+  floorLabels?: Record<string, string>;
+  /**
+   * Phase 8A: パイプライン実行状態。
+   * この値が設定されている場合、時間ベースの疑似進捗ではなく
+   * 実際のパイプライン実行結果を返す。
+   */
+  pipelineStatus?: ApiJobStatus;
+  /** Phase 8A: パイプライン実行結果 */
+  pipelineOutput?: PipelineOutput;
+  /** Phase 8A: パイプライン実行エラー */
+  pipelineError?: { code: string; message: string };
+  /** Phase 8A: 完了日時 */
+  completedAt?: string;
 }
 
 /** ジョブ状態の永続化インターフェース */
@@ -167,7 +186,7 @@ const STEP_TIMELINE: Array<{
 const TOTAL_DURATION = 10000; // ms
 const FAIL_AT_MS = 5000; // fail at the start of step 3
 
-/** Compute current job status/progress based on elapsed time */
+/** Compute current job status/progress based on elapsed time or real pipeline state */
 export function computeJobState(job: StoredJob): {
   status: ApiJobStatus;
   progress: number;
@@ -175,6 +194,37 @@ export function computeJobState(job: StoredJob): {
   completedAt: string | null;
   error: { code: string; message: string } | null;
 } {
+  // Phase 8A: パイプラインが実行された場合、実際の結果を返す
+  if (job.pipelineStatus) {
+    if (job.pipelineStatus === "completed") {
+      return {
+        status: "completed",
+        progress: 100,
+        currentStep: "preparing_artifacts",
+        completedAt: job.completedAt ?? null,
+        error: null,
+      };
+    }
+    if (job.pipelineStatus === "failed") {
+      return {
+        status: "failed",
+        progress: 0,
+        currentStep: null,
+        completedAt: null,
+        error: job.pipelineError ?? { code: "UNKNOWN", message: "不明なエラー" },
+      };
+    }
+    // processing
+    return {
+      status: "processing",
+      progress: 50,
+      currentStep: "detecting_walls_and_openings",
+      completedAt: null,
+      error: null,
+    };
+  }
+
+  // Legacy: 時間ベースの疑似進捗（パイプライン未実行のジョブ用）
   const elapsed = Date.now() - job.startedAtMs;
 
   // Fail check: if shouldFail and enough time has passed

@@ -7,11 +7,8 @@ import { errorResponse } from "@/lib/server/helpers";
  *
  * Download quantities table data for a completed job.
  *
- * ── 責務の境界 ──
- * [Route Handler に残る] 前提条件チェック・数量データ返却
- * [将来 Worker へ移す]  なし（データ返却は Route Handler の責務）
- *   → Phase 8A 以降は Worker が算出した実際の数量データを DB/ストレージから読む形に変わる
- *   → 現在は MOCK_QUANTITIES を直接返している
+ * Phase 8A: パイプライン結果がある場合は実データから数量を算出する。
+ * パイプライン結果がない場合は MOCK_QUANTITIES にフォールバック。
  */
 export async function GET(
   _request: NextRequest,
@@ -27,6 +24,17 @@ export async function GET(
   const state = computeJobState(job);
   if (state.status !== "completed") {
     return errorResponse(409, "DOWNLOAD_NOT_READY", "ジョブがまだ完了していません");
+  }
+
+  // Phase 8A: パイプライン結果がある場合、実データから数量を算出
+  if (job.pipelineOutput) {
+    const stats = job.pipelineOutput.stats;
+    const rows = [
+      { element: "壁", count: stats.totalWalls, unit: "本" },
+      { element: "開口部", count: stats.totalOpenings, unit: "箇所" },
+      { element: "部屋", count: stats.totalRooms, unit: "室" },
+    ];
+    return Response.json({ rows });
   }
 
   return Response.json({ rows: MOCK_QUANTITIES });

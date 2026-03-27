@@ -57,12 +57,19 @@ function mapGetJobResponse(res: GetJobResponse): {
 
 // ── Hook ──
 
+/** Phase 8A: fileId と floorLabel の対応 */
+interface FileEntry {
+  fileId: string;
+  floorLabel: string;
+}
+
 interface UseAmplifyJobReturn {
   status: JobStatus;
   job: AmplifyJob | null;
   artifacts: JobArtifact[];
   error: string | null;
-  startConversion: (fileIds: string[], settings: ConversionSettings) => Promise<void>;
+  /** Phase 8A: files に fileId + floorLabel の対応を渡す */
+  startConversion: (files: FileEntry[], settings: ConversionSettings) => Promise<void>;
   reset: () => void;
 }
 
@@ -115,17 +122,18 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
   }, []);
 
   const startConversion = useCallback(
-    async (fileIds: string[], settings: ConversionSettings) => {
+    async (files: FileEntry[], settings: ConversionSettings) => {
       stopPolling();
       setStatus("processing");
       setError(null);
       setArtifacts([]);
 
       try {
-        // Only send conversion-relevant settings to the API
-        // (opacity and cameraMode are UI-only concerns)
+        // Phase 8A: fileId と floorLabel の対応を API に渡す
+        const fileIds = files.map((f) => f.fileId);
         const res = await api.createAmplifyJob({
           fileIds,
+          files,
           settings: {
             scale: settings.scale,
             floorHeight: settings.floorHeight,

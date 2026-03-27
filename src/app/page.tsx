@@ -106,8 +106,10 @@ function AppContent() {
   // ── Handlers ──
   const handleStartConversion = useCallback(async () => {
     if (!hasFiles) return;
-    await startConversion(fileIds, settings);
-  }, [hasFiles, fileIds, settings, startConversion]);
+    // Phase 8A: fileId と floorLabel の対応を API に渡す
+    const fileEntries = files.map((f) => ({ fileId: f.id, floorLabel: f.label }));
+    await startConversion(fileEntries, settings);
+  }, [hasFiles, files, settings, startConversion]);
 
   const handleReset = useCallback(() => {
     reset();

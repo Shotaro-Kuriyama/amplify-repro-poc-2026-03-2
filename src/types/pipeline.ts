@@ -52,19 +52,12 @@ export interface PipelineFileEntry {
   /**
    * 階数ラベル（例: "1F", "B1"）。
    *
-   * TODO(Phase 8A): 現在この情報はフロントエンド専用（useFileUpload.ts の UploadedFile.label）で、
-   * サーバー側 API には渡されていない。
-   *
-   * 現行の API 契約:
-   * - uploadPlans: ファイルメタデータのみ返却（階数情報なし）
-   * - createAmplifyJob: fileIds[] と settings のみ受付（階数情報なし）
-   *
-   * Phase 8A で PipelineInput を組み立てるには、以下のいずれかが必要:
-   * 案1: createAmplifyJob の request に fileIds と対応する floorLabel を追加する
-   * 案2: 別途 floorLabel を設定する API を追加する
-   * 案3: サーバー側でファイル順序から自動推定する（startFloor + index）
-   *
-   * 現時点では案1が最もシンプル。ただし API 契約変更になるため、Phase 8A 着手時に判断する。
+   * Phase 8A で接続済み:
+   * - createAmplifyJob の request.files[] に floorLabel を渡す形で実装（案1を採用）
+   * - フロントエンドの useFileUpload.ts から label を取得し、
+   *   useAmplifyJob.ts 経由で POST /api/jobs に送信する
+   * - サーバー側は StoredJob.floorLabels に保存し、pipeline.ts で PipelineInput に組み込む
+   * - files が未指定の場合は 1F, 2F... と自動採番にフォールバック
    */
   floorLabel: string;
 }

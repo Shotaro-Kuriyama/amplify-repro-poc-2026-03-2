@@ -2,19 +2,15 @@ import { NextRequest } from "next/server";
 import { getJob, computeJobState } from "@/lib/server/store";
 import { errorResponse } from "@/lib/server/helpers";
 
-const VALID_FORMATS = ["ifc", "rvt", "dwg"];
+const VALID_FORMATS = ["ifc", "rvt", "dwg", "structured_json"];
 
 /**
  * GET /api/jobs/:jobId/artifacts/:format
  *
  * Download a generated artifact file.
- * Returns the file directly as a binary response (案A: 直接ファイルレスポンス).
  *
- * ── 責務の境界 ──
- * [Route Handler に残る] 前提条件チェック・ファイル配信
- * [将来 Worker へ移す]  なし（ダウンロード配信は Route Handler の責務）
- *   → Phase 8A 以降は Worker が生成した実ファイルをストレージから読んで返す形に変わる
- *   → 現在はモックデータを直接返している
+ * Phase 8A: structured_json フォーマットの場合、
+ * パイプライン結果の構造化 JSON をダウンロードできる。
  */
 export async function GET(
   _request: NextRequest,
@@ -36,7 +32,18 @@ export async function GET(
     return errorResponse(409, "DOWNLOAD_NOT_READY", "ジョブがまだ完了していません");
   }
 
-  // Return a mock binary file
+  // Phase 8A: structured_json の場合、パイプライン結果を JSON で返す
+  if (format === "structured_json" && job.pipelineOutput) {
+    const content = JSON.stringify(job.pipelineOutput, null, 2);
+    return new Response(content, {
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="structured.json"`,
+      },
+    });
+  }
+
+  // その他のフォーマットはモックデータを返す
   const content = `mock-artifact-data-${format}`;
   return new Response(content, {
     headers: {

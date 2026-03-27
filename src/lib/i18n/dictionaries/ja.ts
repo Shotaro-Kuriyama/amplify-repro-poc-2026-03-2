@@ -120,6 +120,7 @@ const ja = {
       ifc: "openBIM国際標準形式",
       rvt: "Autodesk Revit形式",
       dwg: "AutoCAD互換形式",
+      structured_json: "構造化JSON",
     },
     orgTypes: {
       architect: "建築設計事務所",

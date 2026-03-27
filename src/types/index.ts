@@ -38,7 +38,7 @@ export interface AmplifyJob {
 }
 
 // ── Artifacts ──
-export type ArtifactFormat = "ifc" | "rvt" | "dwg";
+export type ArtifactFormat = "ifc" | "rvt" | "dwg" | "structured_json";
 
 export interface JobArtifact {
   id: string;

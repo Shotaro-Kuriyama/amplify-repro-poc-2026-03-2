@@ -16,7 +16,7 @@ export const apiProcessingStepSchema = z.enum([
   "preparing_artifacts",
 ]);
 
-export const artifactFormatSchema = z.enum(["ifc", "rvt", "dwg"]);
+export const artifactFormatSchema = z.enum(["ifc", "rvt", "dwg", "structured_json"]);
 
 export const apiErrorPayloadSchema = z.object({
   code: z.string(),
@@ -64,6 +64,8 @@ export const getJobResponseSchema = z.object({
   error: apiErrorPayloadSchema.nullable(),
   createdAt: z.string(),
   completedAt: z.string().nullable(),
+  // Phase 8A: パイプライン実行結果（検証用。構造は PipelineOutput 準拠）
+  pipelineResult: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export const downloadQuantitiesResponseSchema = z.object({

@@ -48,6 +48,12 @@ export interface UploadPlansResponse {
 
 export interface CreateJobRequest {
   fileIds: string[];
+  /**
+   * Phase 8A: fileId と floorLabel の対応。
+   * フロントエンドの階ラベル情報をサーバーに渡すために使う。
+   * 省略時はサーバー側で 1F, 2F... と自動採番する。
+   */
+  files?: { fileId: string; floorLabel: string }[];
   settings: {
     scale: number;
     floorHeight: number;
@@ -71,6 +77,12 @@ export interface GetJobResponse {
   error: ApiErrorPayload | null;
   createdAt: string;
   completedAt: string | null;
+  /**
+   * Phase 8A: パイプライン実行結果（検証・デバッグ用）。
+   * Python が返した構造化 JSON の内容がここに入る。
+   * completed 時のみ値が入り、それ以外は null。
+   */
+  pipelineResult?: Record<string, unknown> | null;
 }
 
 export interface DownloadArtifactRequest {

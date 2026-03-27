@@ -13,27 +13,19 @@ import type { PipelineInput, PipelineOutput } from "@/types/pipeline";
 // ── PipelineInput の組み立て ──
 
 /**
- * floorLabel の暫定生成ルール。
- *
- * 【暫定対応 — Phase 8A 最小縦切り】
- * 現在 floorLabel はフロントエンド専用（useFileUpload.ts）で、
- * サーバー側 API には渡されていない。
- *
- * 今回の暫定ルール:
- * - ファイルの並び順に 1F, 2F, 3F... と自動採番する
- * - 地下階や GF には未対応
- *
- * 将来の正式対応:
- * - createAmplifyJob の request に floorLabel を追加する（案1）
- * - または startFloor パラメータをサーバーに渡す
- * - pipeline.ts の TODO コメントに選択肢を記載済み
+ * floorLabel のフォールバック生成ルール。
+ * StoredJob.floorLabels が未設定の場合にのみ使用する。
+ * ファイルの並び順に 1F, 2F, 3F... と自動採番する。
  */
-function assignFloorLabels(fileIds: string[]): string[] {
-  return fileIds.map((_, i) => `${i + 1}F`);
+function fallbackFloorLabel(index: number): string {
+  return `${index + 1}F`;
 }
 
 /**
  * StoredJob から PipelineInput を組み立てる。
+ *
+ * Phase 8A: フロントエンドから渡された floorLabel があればそれを使い、
+ * なければ自動採番にフォールバックする。
  *
  * エラー時は理由を含む Error を throw する。
  */
@@ -43,8 +35,6 @@ export function buildPipelineInput(jobId: string): PipelineInput {
     throw new Error(`Job not found: ${jobId}`);
   }
 
-  const floorLabels = assignFloorLabels(job.fileIds);
-
   const files = job.fileIds.map((fileId, i) => {
     const file = getFile(fileId);
     if (!file) {
@@ -53,11 +43,13 @@ export function buildPipelineInput(jobId: string): PipelineInput {
     if (!file.filePath) {
       throw new Error(`File has no storage path: ${fileId} (upload may have failed)`);
     }
+    // フロントエンドから渡された floorLabel を優先し、なければ自動採番
+    const floorLabel = job.floorLabels?.[fileId] ?? fallbackFloorLabel(i);
     return {
       fileId: file.fileId,
       filePath: file.filePath,
       originalName: file.originalName,
-      floorLabel: floorLabels[i],
+      floorLabel,
     };
   });
 

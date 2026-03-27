@@ -122,6 +122,7 @@ const en: Dictionary = {
       ifc: "Open BIM standard",
       rvt: "Autodesk Revit format",
       dwg: "AutoCAD compatible",
+      structured_json: "Structured JSON",
     },
     orgTypes: {
       architect: "Architecture Firm",
