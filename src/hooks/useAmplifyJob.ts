@@ -16,7 +16,8 @@ import type { ApiJobStatus, ApiProcessingStep, GetJobResponse } from "@/lib/api/
 import { api } from "@/lib/api/client";
 import { normalizeError } from "@/lib/api/errors";
 
-const POLL_INTERVAL = 1500;
+const POLL_INTERVAL = 400;
+const COMPLETION_DELAY = 600;
 
 function mapApiStatus(apiStatus: ApiJobStatus): JobStatus {
   if (apiStatus === "queued") return "processing";
@@ -212,10 +213,13 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
         setJob(mapped.job);
 
         if (res.status === "completed") {
-          setStatus("completed");
-          setArtifacts(mapped.artifacts);
-          setPipelineResult(mapped.pipelineResult);
-          setPipelineModel(mapped.pipelineModel);
+          // 進捗 UI を一瞬見せてから completed に遷移する
+          pollingRef.current = setTimeout(() => {
+            setStatus("completed");
+            setArtifacts(mapped.artifacts);
+            setPipelineResult(mapped.pipelineResult);
+            setPipelineModel(mapped.pipelineModel);
+          }, COMPLETION_DELAY);
           return;
         }
 
@@ -268,9 +272,8 @@ export function useAmplifyJob(): UseAmplifyJobReturn {
         };
         setJob(initialJob);
 
-        pollingRef.current = setTimeout(() => {
-          pollFnRef.current?.(res.jobId);
-        }, POLL_INTERVAL);
+        // 初回は即時ポーリング（遅延なし）
+        pollFnRef.current?.(res.jobId);
       } catch (err) {
         const apiErr = normalizeError(err);
         setStatus("failed");

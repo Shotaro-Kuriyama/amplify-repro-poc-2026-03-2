@@ -167,7 +167,7 @@ function AppContent() {
       )}
 
       {/* Main content — vertical stack on mobile, horizontal on desktop */}
-      <div className="mx-auto flex w-full max-w-screen-2xl flex-1 flex-col lg:flex-row">
+      <div className="mx-auto flex w-full max-w-screen-2xl flex-1 min-h-0 flex-col lg:flex-row">
         {/* Left sidebar → top section on mobile */}
         <aside className="w-full shrink-0 border-b border-border/40 bg-white lg:w-80 lg:border-b-0 lg:border-r">
           <div className="flex flex-col overflow-y-auto p-4 sm:p-5 lg:h-full">
@@ -310,8 +310,8 @@ function AppContent() {
         </aside>
 
         {/* Main viewer area */}
-        <main className="flex-1 p-3 sm:p-5">
-          <div className="h-full min-h-[350px] sm:min-h-[450px] lg:min-h-[500px]">
+        <main className="flex-1 min-h-0 flex flex-col overflow-y-auto p-3 sm:p-5">
+          <div className="flex-1 min-h-[350px] sm:min-h-[450px] lg:min-h-[500px]">
             <Viewer3D
               status={effectiveStatus}
               progress={job?.progress ?? 0}
@@ -328,14 +328,14 @@ function AppContent() {
 
           {/* Phase 8A: パイプライン結果サマリー（completed 時） */}
           {isCompleted && pipelineResult && (
-            <div className="mt-3">
+            <div className="mt-3 shrink-0">
               <PipelineResultCard result={pipelineResult} />
             </div>
           )}
 
           {/* Phase 8A: エラー詳細（failed 時） */}
           {isFailed && (
-            <div className="mt-3">
+            <div className="mt-3 shrink-0">
               <PipelineErrorCard errorCode={errorCode} errorMessage={error} />
             </div>
           )}
